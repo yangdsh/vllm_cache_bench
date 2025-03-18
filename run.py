@@ -15,6 +15,8 @@ for alg in ['lruml', 'lru']:
         server_configs.append({'host': 'localhost', 
             'cuda_devices': f'CUDA_VISIBLE_DEVICES={i}',
             'eviction_algorithm': alg,
+            'port': 8000+i,
+            'size': size,
             'args': f'--gpu_memory_utilization {size} '
             f' --pipeline-parallel-size 1 --port {8000+i} '       
             f' --eviction_algorithm {alg} --block_size=16'})
@@ -24,14 +26,22 @@ dataset = 'sharegpt'
 dataset_file = '~/ShareGPT_V3_unfiltered_cleaned_split.json'
 client_configs = [
     {
-        'num_prompts': 1000,
-        'request_rate': 30,
+        'num_prompts': 100000,
+        'request_rate': 0.1,
+    },
+    {
+        'num_prompts': 100000,
+        'request_rate': 0.05,
+    },
+    {
+        'num_prompts': 100000,
+        'request_rate': 0.025,
     }
 ]
 
 def run_server(server_config):
     """Start the server with specified parallel sizes."""
-    log_file_name = f"{LOG_FILE}_{server_config['eviction_algorithm']}.log"
+    log_file_name = f"{LOG_FILE}_{server_config['port']}_{server_config['eviction_algorithm']}.log"
     server_cmd = VLLM_SERVER_CMD_TEMPLATE.format(server_config['args'])
     print('\n', server_cmd, '\n')
     ssh_command = (
@@ -95,10 +105,20 @@ async def run_client(client_config, server_config):
     stdout, stderr = await process.communicate()
     print("Client stdout:", stdout.decode())
     print("Client stderr:", stderr.decode())
+    hit_ratios = []
+    for line in stdout.decode().split("\n"):
+        if 'gpu_prefix_cache_hit_rate' in line:
+            hit_ratios.append(line.split()[-1])
     
     with open(f'{DIR}/configs/config_{result_filename}', 'w') as fp:
         json.dump([client_config, server_config], fp)
     print('\n' + client_cmd + '\n')
+    result = {'hit_ratios': hit_ratios}
+    for k in ['eviction_algorithm', 'size']:
+        result[k] = server_config[k]
+    for k in client_config.keys():
+        result[k] = client_config[k]
+    return result
 
 async def start_server(server_config):
     # Launch the server and wait for it to be ready.
@@ -110,8 +130,35 @@ async def start_server(server_config):
 async def start_exp(server_config, client_configs):
     print("Starting server configuration:", server_config)
     await start_server(server_config)
+    
+    results = []
     for client_config in client_configs:
-        await run_client(client_config, server_config)
+        result = await run_client(client_config, server_config)
+        results.append(result)
+
+    # Save results to `exp.json` in append mode
+    exp_file = f"{DIR}/exp.json"
+    
+    # Load existing data if the file exists
+    if os.path.exists(exp_file):
+        with open(exp_file, "r") as fp:
+            try:
+                existing_data = json.load(fp)
+                if not isinstance(existing_data, list):
+                    existing_data = []  # Reset if data is corrupted
+            except json.JSONDecodeError:
+                existing_data = []  # Reset if file is empty or corrupted
+    else:
+        existing_data = []
+
+    # Append new results
+    existing_data.extend(results)
+
+    # Write back to the file
+    with open(exp_file, "w") as fp:
+        json.dump(existing_data, fp, indent=4)
+
+    print(f"Saved results to {exp_file}")
 
 async def main():
     # Stop any running server on this node.
