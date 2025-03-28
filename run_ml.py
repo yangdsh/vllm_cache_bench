@@ -11,7 +11,7 @@ from constants import LOG_FILE, CUDA_OOM_PATTERN, ERROR_PATTERN, RAISE_PATTERN
 async def main(sizes):
     server_configs = []
     i = 0
-    for alg in ['lru']:
+    for alg in ['lru-ml-bert6']:
         for size in sizes:
             server_configs.append({'host': 'localhost', 
                 'cuda_devices': f'CUDA_VISIBLE_DEVICES={i+1}',
@@ -20,16 +20,15 @@ async def main(sizes):
                 'size': size,
                 'args': f'--gpu_memory_utilization {size} '
                 f' --pipeline-parallel-size 1 --port {8000+i} '       
-                #f' --eviction_algorithm {alg} --block_size=16'}
-            })
+                f' --eviction_algorithm {alg} --block_size=16'})
             i += 1
 
     dataset = 'sharegpt'
     dataset_file = '~/ShareGPT_V3_unfiltered_cleaned_split.json'
     client_configs = [
         {
-            'num_prompts': 10000,
-            'request_rate': 0.01,
+            'num_prompts': 3000,
+            'request_rate': 0.02,
         },
     ]
 
@@ -166,6 +165,6 @@ async def main(sizes):
     await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
-    for sizes in [[0.5, 0.6, 0.7, 0.75, 0.8, 0.9]]:
+    for sizes in [[0.45, 0.5, 0.55, 0.6, 0.65, 0.7]]:
         asyncio.run(main(sizes))
         
