@@ -14,22 +14,33 @@ async def main(sizes):
     for alg in ['lru']:
         for size in sizes:
             server_configs.append({'host': 'localhost', 
-                'cuda_devices': f'CUDA_VISIBLE_DEVICES={i+1}',
+                'cuda_devices': f'CUDA_VISIBLE_DEVICES=2,3,4,{i+1}',
                 'eviction_algorithm': alg,
                 'port': 8000+i,
                 'size': size,
                 'args': f'--gpu_memory_utilization {size} '
                 f' --pipeline-parallel-size 1 --port {8000+i} '       
-                #f' --eviction_algorithm {alg} --block_size=16'}
+                f' --eviction_algorithm {alg} --block_size=16'
             })
             i += 1
 
     dataset = 'sharegpt'
     dataset_file = '~/ShareGPT_V3_unfiltered_cleaned_split.json'
+    checkpoint = '/data/dongshengy/vllm/benchmarks/classifier6.pt'
+    client_configs = [
+        {
+            'num_prompts': 10000,
+            'request_rate': 0.0025,
+            'session_rate': 1,
+        },
+    ]
+    dataset_file = '"lmsys/lmsys-chat-1m"'
+    checkpoint = '/data/dongshengy/vllm/benchmarks/lmsys-chat-1m2.pt'
     client_configs = [
         {
             'num_prompts': 10000,
             'request_rate': 0.01,
+            'session_rate': 4,
         },
     ]
 
@@ -39,7 +50,7 @@ async def main(sizes):
         server_cmd = VLLM_SERVER_CMD_TEMPLATE.format(server_config['args'])
 
         ssh_command = (
-            f'ssh {server_config["host"]} '
+            #f'ssh {server_config["host"]} '
             # f"source /opt/conda/etc/profile.d/conda.sh && "  # Ensure Conda is sourced
             # f"conda activate pytorch && "  # Activate the environment
             f"{server_config['cuda_devices']} {server_cmd}"  # Run the actual command
@@ -75,6 +86,8 @@ async def main(sizes):
     async def run_client(client_config, server_config):
         num_prompts = client_config['num_prompts']
         request_rate = client_config['request_rate']
+        session_rate = client_config['session_rate']
+        checkpoint = client_config['checkpoint']
         prefix = get_file_name(server_config)
         result_filename = f"{prefix}.json"
         
@@ -88,7 +101,8 @@ async def main(sizes):
         port = port_match.group(1)
         
         client_cmd = CLIENT_CMD_TEMPLATE.format(
-            dataset_file, dataset, host, port, result_filename, num_prompts, request_rate
+            dataset_file, dataset, host, port, result_filename, num_prompts, request_rate, session_rate,
+            checkpoint
         )
         print("Running client command:", client_cmd)
         
@@ -166,6 +180,6 @@ async def main(sizes):
     await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
-    for sizes in [[0.5, 0.6, 0.7, 0.75, 0.8, 0.9]]:
+    for sizes in [[0.9]]:
         asyncio.run(main(sizes))
         
