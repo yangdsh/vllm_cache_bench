@@ -3,7 +3,7 @@ import json
 
 # Read data from file
 dir = 'results/Qwen2.5-0.5B/exp_tay-1-hit-wonder.json'
-dir = 'results/Qwen2.5-0.5B/exp_lmsys.json'
+dir = 'results/Qwen2.5-0.5B/exp_lmsys0410.json'
 with open(dir, 'r') as file:
     data = json.load(file)
 

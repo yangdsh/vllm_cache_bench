@@ -85,6 +85,8 @@ async def main(sizes, alg):
             'use_fifo': 1,
             'algorithm': 'lru-fifo'
         },
+    ]
+    client_configs = [
         {
             'num_prompts': 5000,
             'request_rate': 0.01,
@@ -136,6 +138,18 @@ async def main(sizes, alg):
             'use_fifo': 1,
             'algorithm': 'lru-fifo'
         },
+    ]
+    client_configs = [
+        {
+            'num_prompts': 5000,
+            'request_rate': 0.01,
+            'session_rate': 4,
+            'checkpoint': '/data/dongshengy/vllm/benchmarks/lmsys-chat-1m5.pt',
+            'dataset_file': '"lmsys/lmsys-chat-1m"',
+            'dataset_name': 'lmsys0410',
+            'use_oracle': 0,
+            'algorithm': 'lru-ml'
+        }
     ]
 
     def run_server(server_config):
@@ -282,7 +296,7 @@ async def main(sizes, alg):
     await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
-    for alg in ['lru', 'ml']:
+    for alg in ['ml']:
         for sizes in [[0.4, 0.5, 0.6, 0.7, 0.8, 0.9]]:
             asyncio.run(main(sizes, alg))
         

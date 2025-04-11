@@ -33,3 +33,8 @@ SERVER_READY_PATTERN = r"startup complete"
 CUDA_OOM_PATTERN = r"CUDA out of memory"
 ERROR_PATTERN = r"!error!"
 RAISE_PATTERN = r"raise"
+
+
+'''
+CUDA_VISIBLE_DEVICES=0 VLLM_SERVER_DEV_MODE=1 VLLM_LOGGING_LEVEL=INFO vllm serve Qwen/Qwen2.5-0.5B --dtype=half --disable-log-requests --max_num_seqs 512 --num-scheduler-steps 1 --max-model-len 16384 --disable_custom_all_reduce --enable-chunked-prefill --enable-prefix-caching --gpu_memory_utilization 0.4  --pipeline-parallel-size 1 --port 8000  --eviction_algorithm lru --block_size=16
+'''
