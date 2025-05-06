@@ -8,7 +8,7 @@ import os
 import re
 from constants import LOG_FILE, CUDA_OOM_PATTERN, ERROR_PATTERN, RAISE_PATTERN
 
-async def main(sizes, alg):
+async def main(sizes, alg, _dataset):
     server_configs = []
     i = 0
     for size in sizes:
@@ -17,140 +17,124 @@ async def main(sizes, alg):
             'eviction_algorithm': alg,
             'port': 8000+i,
             'size': size,
-            'args': f'--gpu_memory_utilization {size} '
+            'args': f'--num-gpu-blocks-override {size} '
             f' --pipeline-parallel-size 1 --port {8000+i} '       
             f' --eviction_algorithm {alg} --block_size=16'
         })
         i += 1
 
-    client_configs = [
-        {
-            'num_prompts': 3000, #10000,
-            'request_rate': 0.02, # 0.0025,
-            'session_rate': 4, # 1
-            'checkpoint': '/data/dongshengy/vllm/benchmarks/classifier6.pt',
-            'dataset_file': '~/ShareGPT_V3_unfiltered_cleaned_split.json',
-            'dataset_name': 'sharegpt',
-            'use_oracle': 0,
-        },
-    ]
-    client_configs = [
-        {
-            'num_prompts': 5000, #10000,
-            'request_rate': 0.1, # 0.0025,
-            'session_rate': 4, # 1
-            'checkpoint': '/data/dongshengy/vllm/benchmarks/Tay5.pt',
-            'dataset_file': '~/tay.json',
-            'dataset_name': 'tay0410',
-            'use_oracle': 0,
-            'algorithm': 'ml'
-        },
-        {
-            'num_prompts': 5000,
-            'request_rate': 0.1,
-            'session_rate': 4,
-            'checkpoint': '/data/dongshengy/vllm/benchmarks/Tay5.pt',
-            'dataset_file': '~/tay.json',
-            'dataset_name': 'tay0410',
-            'use_oracle': 2,
-            'algorithm': 'ml-belady'
-        },
-        {
-            'num_prompts': 5000, #10000,
-            'request_rate': 0.02, # 0.0025,
-            'session_rate': 8, # 1
-            'checkpoint': '/data/dongshengy/vllm/benchmarks/Tay5.pt',
-            'dataset_file': '~/tay.json',
-            'dataset_name': 'tay0410',
+    
+    '''        {
+            'num_prompts': 10000,
+            'session_rate': 20,
             'use_oracle': 1,
-            'algorithm': 'ml-true-break-tie'
+            'use_token_id': 1,
+            'algorithm': 'ml-true-token'
         },
         {
-            'num_prompts': 5000, #10000,
-            'request_rate': 0.02, # 0.0025,
-            'session_rate': 8, # 1
-            'checkpoint': '/data/dongshengy/vllm/benchmarks/Tay5.pt',
-            'dataset_file': '~/tay.json',
-            'dataset_name': 'tay0410',
-            'use_fifo': 0,
-            'algorithm': 'lru'
-        },
-        {
-            'num_prompts': 5000, #10000,
-            'request_rate': 0.02, # 0.0025,
-            'session_rate': 8, # 1
-            'checkpoint': '/data/dongshengy/vllm/benchmarks/Tay5.pt',
-            'dataset_file': '~/tay.json',
-            'dataset_name': 'tay0410',
-            'use_fifo': 1,
-            'algorithm': 'lru-fifo'
-        },
-    ]
-    client_configs = [
-        {
-            'num_prompts': 5000,
-            'request_rate': 0.01,
-            'session_rate': 4,
-            'checkpoint': '/data/dongshengy/vllm/benchmarks/lmsys-chat-1m5.pt',
-            'dataset_file': '"lmsys/lmsys-chat-1m"',
-            'dataset_name': 'lmsys0410',
+            'num_prompts': 10000,
+            'session_rate': 20,
             'use_oracle': 2,
-            'algorithm': 'ml-belady'
-        },
-        {
-            'num_prompts': 5000,
-            'request_rate': 0.01,
-            'session_rate': 4,
-            'checkpoint': '/data/dongshengy/vllm/benchmarks/lmsys-chat-1m5.pt',
-            'dataset_file': '"lmsys/lmsys-chat-1m"',
-            'dataset_name': 'lmsys0410',
-            'use_oracle': 1,
-            'algorithm': 'ml-true-break-tie'
-        },
-        {
-            'num_prompts': 5000,
-            'request_rate': 0.01,
-            'session_rate': 4,
-            'checkpoint': '/data/dongshengy/vllm/benchmarks/lmsys-chat-1m5.pt',
-            'dataset_file': '"lmsys/lmsys-chat-1m"',
-            'dataset_name': 'lmsys0410',
-            'use_oracle': 0,
-            'algorithm': 'ml'
-        },
-        {
-            'num_prompts': 5000,
-            'request_rate': 0.01,
-            'session_rate': 4,
-            'checkpoint': '/data/dongshengy/vllm/benchmarks/lmsys-chat-1m5.pt',
-            'dataset_file': '"lmsys/lmsys-chat-1m"',
-            'dataset_name': 'lmsys0410',
-            'use_oracle': 0,
-            'algorithm': 'lru'
-        },
-        {
-            'num_prompts': 5000,
-            'request_rate': 0.01,
-            'session_rate': 4,
-            'checkpoint': '/data/dongshengy/vllm/benchmarks/lmsys-chat-1m5.pt',
-            'dataset_file': '"lmsys/lmsys-chat-1m"',
-            'dataset_name': 'lmsys0410',
-            'use_oracle': 0,
-            'use_fifo': 1,
-            'algorithm': 'lru-fifo'
-        },
-    ]
+            'use_token_id': 1,
+            'algorithm': 'ml-oracle-token'
+        },'''
     client_configs = [
         {
-            'num_prompts': 5000,
-            'request_rate': 0.01,
-            'session_rate': 4,
-            'checkpoint': '/data/dongshengy/vllm/benchmarks/lmsys-chat-1m5.pt',
-            'dataset_file': '"lmsys/lmsys-chat-1m"',
-            'dataset_name': 'lmsys0410',
+            'num_prompts': 10000,
+            'session_rate': 20,
             'use_oracle': 0,
-            'algorithm': 'lru-ml'
+            'use_token_id': 1,
+            'algorithm': 'ml-token'
+        },
+        {
+            'num_prompts': 10000,
+            'session_rate': 20,
+            'use_oracle': 0,
+            'use_token_id': 1,
+            'algorithm': 'lru-token'
         }
     ]
+    for c in client_configs:
+        if _dataset == 'tay':
+            c['checkpoint'] = '/data/dongshengy/vllm/benchmarks/checkpoints_tay_20/tay_epoch17_metric_0_6332.pt'
+            c['dataset_file'] = '~/tay.json'
+            c['dataset_name'] = 'tay0422'
+            c['request_rate'] = 0.1
+            c['max_active_conversations'] = 300
+            c['time_limit'] = 1200
+        elif _dataset == 'chatbot001':
+            c['request_rate'] = 0.01
+            c['checkpoint'] = '/data/dongshengy/vllm/benchmarks/checkpoints_chatbot_arena_20/chatbot_arena_epoch16_metric_0_4005.pt'
+            c['dataset_file'] = '"lmsys/chatbot_arena_conversations"'
+            c['max_active_conversations'] = 300
+            c['time_limit'] = 1200
+            c['dataset_name'] = 'chatbot001-1200'
+        elif _dataset == 'lmsys001':
+            c['request_rate'] = 0.01
+            c['checkpoint'] = '/data/dongshengy/vllm/benchmarks/checkpoints_lmsys-chat-1m/lmsys-chat-1m_epoch4_metric_0_6818.pt'
+            c['dataset_file'] = '"lmsys/lmsys-chat-1m"'
+            c['max_active_conversations'] = 300
+            c['time_limit'] = 1200
+            c['dataset_name'] = 'lmsys001-1200'
+        elif _dataset == 'lmsys003':
+            c['request_rate'] = 0.03
+            c['checkpoint'] = '/data/dongshengy/vllm/benchmarks/checkpoints_lmsys-chat-1m/lmsys-chat-1m_epoch4_metric_0_6818.pt'
+            c['dataset_file'] = '"lmsys/lmsys-chat-1m"'
+            c['time_limit'] = 1200
+            c['max_active_conversations'] = 100
+            c['dataset_name'] = 'lmsys003-1200'
+        elif _dataset == 'lmsys0003':
+            c['request_rate'] = 0.003
+            c['checkpoint'] = '/data/dongshengy/vllm/benchmarks/checkpoints_lmsys-chat-1m/lmsys-chat-1m_epoch4_metric_0_6818.pt'
+            c['dataset_file'] = '"lmsys/lmsys-chat-1m"'
+            c['max_active_conversations'] = 300
+            c['time_limit'] = 1200
+            c['dataset_name'] = 'lmsys0003-1200'
+        elif _dataset == 'sharegpt001':
+            c['request_rate'] = 0.01
+            c['time_limit'] = 1200
+            c['max_active_conversations'] = 300
+            c['checkpoint'] = '/data/dongshengy/vllm/benchmarks/checkpoints_sharegpt_20/sharegpt_epoch4_metric_0_5035.pt'
+            c['dataset_file'] = '~/ShareGPT_V3_unfiltered_cleaned_split.json'
+            c['dataset_name'] = 'sharegpt001-1200'
+        elif _dataset == 'sharegpt003':
+            c['request_rate'] = 0.03
+            c['time_limit'] = 1200
+            c['max_active_conversations'] = 100
+            c['checkpoint'] = '/data/dongshengy/vllm/benchmarks/checkpoints_sharegpt_20/sharegpt_epoch4_metric_0_5035.pt'
+            c['dataset_file'] = '~/ShareGPT_V3_unfiltered_cleaned_split.json'
+            c['dataset_name'] = 'sharegpt003-1200'
+        elif _dataset == 'gpt001':
+            c['request_rate'] = 0.01
+            c['time_limit'] = 1200
+            c['max_active_conversations'] = 100
+            c['checkpoint'] = '/data/dongshengy/vllm/benchmarks/checkpoints_gpt4_20/gpt4_epoch13_metric_0_5642.pt'
+            c['dataset_file'] = 'lightblue/gpt4_conversations_multilingual'
+            c['dataset_name'] = 'gpt001-1200-100'
+        elif _dataset == 'science':
+            c['request_rate'] = 0.1
+            c['num_prompts'] = 1000
+            c['session_rate'] = 0.5
+            c['checkpoint'] = '/data/dongshengy/vllm/benchmarks/sharegpt2.pt'
+            c['dataset_file'] = '~/Scientific_Dialog-ShareGPT.json'
+            c['dataset_name'] = 'science0428'
+            c['add_ending_request'] = 1
+        elif _dataset == 'code':
+            c['request_rate'] = 0.1
+            c['num_prompts'] = 1000
+            c['session_rate'] = 0.5
+            c['checkpoint'] = '/data/dongshengy/vllm/benchmarks/sharegpt2.pt'
+            c['dataset_file'] = '~/Code-290k-ShareGPT.json'
+            c['dataset_name'] = 'code0428'
+            c['add_ending_request'] = 1
+        elif _dataset == 'math':
+            c['request_rate'] = 0.1
+            c['num_prompts'] = 1000
+            c['session_rate'] = 0.5
+            c['checkpoint'] = '/data/dongshengy/vllm/benchmarks/sharegpt2.pt'
+            c['dataset_file'] = '~/Olympiad_Math-ShareGPT.json'
+            c['dataset_name'] = 'math0428'
+            c['add_ending_request'] = 1
 
     def run_server(server_config):
         """Start the server with specified parallel sizes."""
@@ -196,8 +180,12 @@ async def main(sizes, alg):
         request_rate = client_config['request_rate']
         session_rate = client_config['session_rate']
         checkpoint = client_config['checkpoint']
+        max_active_conversations = client_config['max_active_conversations'] \
+            if 'max_active_conversations' in client_config else 10000
+        time_limit = client_config['time_limit'] if 'time_limit' in client_config else 10000
         use_oracle = client_config['use_oracle'] if 'use_oracle' in client_config else 0
-        use_fifo = client_config['use_fifo'] if 'use_fifo' in client_config else 0
+        use_token_id = client_config['use_token_id'] if 'use_token_id' in client_config else 0
+        use_lru = 1 if 'lru' in client_config['algorithm'] else 0
         prefix = get_file_name(server_config)
         result_filename = f"{prefix}.json"
         
@@ -213,7 +201,8 @@ async def main(sizes, alg):
         client_cmd = CLIENT_CMD_TEMPLATE.format(
             client_config['dataset_file'], 'conversation', host, 
             port, result_filename, num_prompts, request_rate, session_rate,
-            checkpoint, use_oracle, use_fifo
+            checkpoint, use_oracle, use_token_id, use_lru, max_active_conversations,
+            time_limit
         )
         print("Running client command:", client_cmd)
         
@@ -226,7 +215,7 @@ async def main(sizes, alg):
         add_client_procs(process)  # <-- Don't overwrite process
 
         stdout, stderr = await process.communicate()
-        log_file_name = f"{LOG_FILE}_{server_config['port']}_{server_config['eviction_algorithm']}_client.log"
+        log_file_name = f"{LOG_FILE}_{server_config['port']}_{client_config['algorithm']}_client.log"
         log_file = open(log_file_name, "w")
         print("Client stdout:", stdout.decode(), file=log_file)
         print("Client stderr:", stderr.decode(), file=log_file)
@@ -256,16 +245,12 @@ async def main(sizes, alg):
         print("Starting server configuration:", server_config)
         await start_server(server_config)
         
-        results_dict = {}
-        for client_config in client_configs:
-            if server_config['eviction_algorithm'] not in client_config['algorithm']:
-                continue
+        for i, client_config in enumerate(client_configs):
+            #if server_config['eviction_algorithm'] not in client_config['algorithm']:
+            #    continue
             result = await run_client(client_config, server_config)
-            if client_config['dataset_name'] not in results_dict:
-                results_dict[client_config['dataset_name']] = []
-            results_dict[client_config['dataset_name']].append(result)
+            dataset_name = client_config['dataset_name']
 
-        for dataset_name, results in results_dict.items():
             # Save results to `exp.json` in append mode
             exp_file = f"{DIR}/exp_{dataset_name}.json"
             
@@ -282,7 +267,7 @@ async def main(sizes, alg):
                 existing_data = []
 
             # Append new results
-            existing_data.extend(results)
+            existing_data.append(result)
 
             # Write back to the file
             with open(exp_file, "w") as fp:
@@ -297,6 +282,7 @@ async def main(sizes, alg):
 
 if __name__ == "__main__":
     for alg in ['ml']:
-        for sizes in [[0.4, 0.5, 0.6, 0.7, 0.8, 0.9]]:
-            asyncio.run(main(sizes, alg))
+        for dataset in ['chatbot001']: #'tay', 'sharegpt001', 'lmsys001', 'science', 'math', 'code'
+            for sizes in [[10000, 12000, 14000, 16000, 20000]]: #13000, 20000, 24000, 28000, 32000   3000, 5000, 7000, 10000, 16000
+                asyncio.run(main(sizes, alg, dataset))
         
