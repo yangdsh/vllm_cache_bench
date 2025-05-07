@@ -44,7 +44,7 @@ def plot_dataset(file_path):
     plt.tight_layout()
 
     # Save figure to file
-    plt.savefig(f'hit_ratios_{dataset_name}.png', dpi=300)
+    plt.savefig(f'fig/hit_ratios_{dataset_name}.png', dpi=300)
     plt.show()
 
 

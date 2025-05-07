@@ -6,7 +6,7 @@ import asyncio
 from utils import kill_server, add_proc, add_client_procs
 import os
 import re
-from constants import LOG_FILE, CUDA_OOM_PATTERN, ERROR_PATTERN, RAISE_PATTERN
+from constants import LOG_FILE, CUDA_OOM_PATTERN, ERROR_PATTERN, RAISE_PATTERN, SERVER_COMMEND_PREFIX
 
 async def main(sizes, alg, _dataset):
     server_configs = []
@@ -95,7 +95,7 @@ async def main(sizes, alg, _dataset):
             c['request_rate'] = 0.01
             c['time_limit'] = 1200
             c['max_active_conversations'] = 300
-            c['checkpoint'] = '/data/dongshengy/vllm/benchmarks/checkpoints_sharegpt_20/sharegpt_epoch4_metric_0_5035.pt'
+            c['checkpoint'] = '/data/dongshengy/vllm/benchmarks/checkpoints_sharegpt_20/sharegpt_epoch19_metric_0_5427.pt'
             c['dataset_file'] = '~/ShareGPT_V3_unfiltered_cleaned_split.json'
             c['dataset_name'] = 'sharegpt001-1200'
         elif _dataset == 'sharegpt003':
@@ -146,7 +146,7 @@ async def main(sizes, alg, _dataset):
             #f'ssh {server_config["host"]} '
             # f"source /opt/conda/etc/profile.d/conda.sh && "  # Ensure Conda is sourced
             # f"conda activate pytorch && "  # Activate the environment
-            f"{server_config['cuda_devices']} {server_cmd}"  # Run the actual command
+            f"{SERVER_COMMEND_PREFIX} {server_config['cuda_devices']} {server_cmd}"
         )
         print('\n', ssh_command, '\n')
         with open(log_file_name, "w") as log_file:

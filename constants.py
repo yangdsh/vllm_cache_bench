@@ -1,5 +1,6 @@
 import os
 
+SERVER_COMMEND_PREFIX = ""
 MODEL = "Qwen/Qwen2.5-0.5B-Instruct" # "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" # 'Qwen/Qwen2.5-32B'
 #MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
 DIR = f"results/{MODEL.split('/')[-1]}"
@@ -32,7 +33,7 @@ CLIENT_CMD_TEMPLATE = (
 
 SERVER_READY_PATTERN = r"startup complete"
 CUDA_OOM_PATTERN = r"CUDA out of memory"
-ERROR_PATTERN = r"!error!"
+ERROR_PATTERN = r"RuntimeError"
 RAISE_PATTERN = r"raise"
 
 
