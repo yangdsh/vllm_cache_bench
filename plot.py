@@ -7,7 +7,7 @@ def plot_dataset(file_path):
 
     # Organize data by eviction algorithm
     algorithm_data = {}
-    for config in data:
+    for config in reversed(data):
         #if config['request_rate'] != 0.01:
         #    continue
         algorithm = config['eviction_algorithm']
@@ -15,12 +15,8 @@ def plot_dataset(file_path):
             algorithm = config['algorithm']
             #if 'lru' not in algorithm:
             #    continue
-        if True or 'true' in algorithm or 'true' in algorithm or algorithm == 'lru':
-            if '0.7-0.8' in algorithm or '0.7-0.6' in algorithm or '0.7-1' in algorithm:
-                continue
-            if '0.7-0.7' in algorithm:
-                algorithm = algorithm[:-4]
-            size = config['size']
+        size = config['size']
+        if algorithm not in algorithm_data or size not in algorithm_data[algorithm]['sizes']:
             hit_ratio = float(config['hit_ratios'][-1])
 
             if algorithm not in algorithm_data:

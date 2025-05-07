@@ -58,10 +58,11 @@ async def main(sizes, alg, _dataset):
         if _dataset == 'tay':
             c['checkpoint'] = '/data/dongshengy/vllm/benchmarks/checkpoints_tay_20/tay_epoch17_metric_0_6332.pt'
             c['dataset_file'] = '~/tay.json'
-            c['dataset_name'] = 'tay0422'
-            c['request_rate'] = 0.1
-            c['max_active_conversations'] = 300
-            c['time_limit'] = 1200
+            c['dataset_name'] = 'tay-400'
+            c['request_rate'] = 1
+            c['session_rate'] = 5
+            c['max_active_conversations'] = 100
+            c['time_limit'] = 400
         elif _dataset == 'chatbot001':
             c['request_rate'] = 0.01
             c['checkpoint'] = '/data/dongshengy/vllm/benchmarks/checkpoints_chatbot_arena_20/chatbot_arena_epoch16_metric_0_4005.pt'
@@ -282,7 +283,7 @@ async def main(sizes, alg, _dataset):
 
 if __name__ == "__main__":
     for alg in ['ml']:
-        for dataset in ['chatbot001']: #'tay', 'sharegpt001', 'lmsys001', 'science', 'math', 'code'
+        for dataset in ['tay']: #'chatbot001', 'sharegpt001', 'lmsys001', 'science', 'math', 'code'
             for sizes in [[10000, 12000, 14000, 16000, 20000]]: #13000, 20000, 24000, 28000, 32000   3000, 5000, 7000, 10000, 16000
                 asyncio.run(main(sizes, alg, dataset))
         
