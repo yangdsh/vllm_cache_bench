@@ -6,28 +6,21 @@ import math
 import time
 import signal
 
-procs = []
+procs = {}
 
-def add_proc(p):
-    procs.append(p)
+def add_proc(port, p):
+    procs[port] = p
+
+def kill_proc_on_port(port):
+    if port in procs:
+        procs[port].kill()
+        procs[port].wait()
+        del procs[port]
 
 client_procs = []
 
 def add_client_procs(p):
     client_procs.append(p)
-
-def cleanup(signum, frame):
-    print("Cleaning up...")
-    for p in procs:
-        if p.poll() is None:
-            p.terminate()
-    for p in client_procs:
-        if p.is_alive():
-            p.terminate()
-    exit(0)
-
-signal.signal(signal.SIGINT, cleanup)
-signal.signal(signal.SIGTERM, cleanup)
 
 
 def restart_ray():
@@ -86,9 +79,8 @@ def is_port_in_use(port, host=None):
 def kill_server(host):
     """Kill any running server process."""
     try:
-        subprocess.run(["ssh", host, "pkill -f vllm"])
-        # subprocess.run(["ssh", host, "pkill -f /opt/conda/bin/python3.12"])
-        # subprocess.run(["ssh", host, "pkill -f nsys"])
+        user = os.getenv("USER")
+        subprocess.run(["pkill", "-u", user, "-f", "vllm"])
         print("Killed any running 'vllm serve' process.")
     except subprocess.CalledProcessError as e:
         print("No 'vllm serve' processes were running:", e)

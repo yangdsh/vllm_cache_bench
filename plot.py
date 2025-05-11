@@ -13,8 +13,8 @@ def plot_dataset(file_path):
         algorithm = config['eviction_algorithm']
         if 'algorithm' in config:
             algorithm = config['algorithm']
-            #if 'lru' not in algorithm:
-            #    continue
+            if 'true' in algorithm:
+                continue
         size = config['size']
         if algorithm not in algorithm_data or size not in algorithm_data[algorithm]['sizes']:
             hit_ratio = float(config['hit_ratios'][-1])
@@ -28,7 +28,7 @@ def plot_dataset(file_path):
     dataset_name = data[0]['dataset_name']
 
     # Plotting
-    plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(3.5, 2.5))
     for algorithm, values in algorithm_data.items():
         sorted_pairs = sorted(zip(values['sizes'], values['hit_ratios']))
         sizes_sorted, hit_ratios_sorted = zip(*sorted_pairs)
@@ -36,33 +36,32 @@ def plot_dataset(file_path):
         plt.plot(sizes_sorted, hit_ratios_sorted, marker='o', label=algorithm)
 
     plt.ylim(bottom=0)
-    plt.xlabel('Cache Size')
+    plt.xlabel('Cache Size (# of blocks)')
     plt.ylabel('Hit Ratio')
-    plt.title(dataset_name)
+    # plt.title(dataset_name)
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.legend()
     plt.tight_layout()
 
     # Save figure to file
-    plt.savefig(f'fig/hit_ratios_{dataset_name}.png', dpi=300)
+    print(f'fig/hit_ratios_{dataset_name}.png')
+    plt.savefig(f'fig/hit_ratios_{dataset_name}.png', dpi=300, bbox_inches='tight', pad_inches=0.01)
     plt.show()
 
-
-file_paths = ['results/Qwen2.5-0.5B-Instruct/exp_tay0422.json',
-'results/Qwen2.5-0.5B-Instruct/exp_sharegpt003-1200.json',
-'results/Qwen2.5-0.5B-Instruct/exp_sharegpt001-1200.json',
-'results/Qwen2.5-0.5B-Instruct/exp_lmsys0003-1200.json',
-'results/Qwen2.5-0.5B-Instruct/exp_lmsys003-1200.json',
-'results/Qwen2.5-0.5B-Instruct/exp_lmsys001-1200.json',
-'results/Qwen2.5-0.5B-Instruct/exp_lmsys003-3-1200.json',
-'results/Qwen2.5-0.5B-Instruct/exp_lmsys001-3-1200.json',
-'results/Qwen2.5-0.5B-Instruct/exp_chatbot001-1200.json',
-'results/Qwen2.5-0.5B-Instruct/exp_gpt001-1200.json',
-'results/Qwen2.5-0.5B-Instruct/exp_gpt001-1200-100.json',
-'results/Qwen2.5-0.5B-Instruct/exp_code0428.json',
-'results/Qwen2.5-0.5B-Instruct/exp_math0422.json',
-'results/Qwen2.5-0.5B-Instruct/exp_math0428.json',
-'results/Qwen2.5-0.5B-Instruct/exp_science0428.json',
+dir = 'results/98a63908b41686889a6ade39c37616e54d49974d/result_Nconv=300_1'
+file_paths = [f'{dir}/exp_chatbot001-1200.json',
+f'{dir}/exp_sharegpt001-1200.json',
+f'{dir}/exp_tay-600.json',
+f'{dir}/exp_tay-300.json',
+f'{dir}/exp_lmsys300.json',
+f'{dir}/exp_chatbot300.json',
+f'{dir}/exp_sharegpt300.json',
+f'{dir}/exp_lmsys200.json',
+f'{dir}/exp_chatbot200.json',
+f'{dir}/exp_sharegpt200.json',
+f'{dir}/exp_tay300.json',
 ]
 for file_path in file_paths:
     plot_dataset(file_path)
+
+# 200 does not have the conversaton end time adjustment by total output length
