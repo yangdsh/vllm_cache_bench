@@ -1,7 +1,7 @@
 from huggingface_hub import snapshot_download
 
 snapshot_download(
-    repo_id="Qwen/Qwen3-8B-FP8",
+    repo_id="Qwen/Qwen2.5-72B-Instruct",
     cache_dir="/scratch/gpfs/dy5/.cache/huggingface/hub/",
     resume_download=True
 )

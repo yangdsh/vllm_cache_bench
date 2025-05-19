@@ -1,0 +1,16 @@
+conda env create -f environment.yml
+conda activate vllm-cuda121
+
+# set up vllm
+cd vllm
+VLLM_USE_PRECOMPILED=1 pip install --editable .
+
+# run
+python3 run_della.py
+
+# plot
+python plot_size.py
+python plot_reqrate.py
+python throughput.py
+python ttft.py
+python true_line.py

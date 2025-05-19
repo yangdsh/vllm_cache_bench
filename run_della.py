@@ -16,53 +16,54 @@ async def main(sizes, scales, alg, _dataset, tag):
             if 'tensor-parallel' not in VLLM_SERVER_CMD_TEMPLATE:
                 if ENV == 'della':
                     cuda_device_id = i
-                else:
+                elif ENV == 'fat2':
                     cuda_device_id = i+1
+                else:
+                    cuda_device_id = i
             else:
-                cuda_device_id = ''
+                cuda_device_id = ','.join(range(i,i+4))
             server_configs.append({'host': 'localhost', 
                 'cuda_devices': f'CUDA_VISIBLE_DEVICES={cuda_device_id}',
                 'eviction_algorithm': alg,
                 'port': 8000+i,
                 'size': size,
                 'scale': scale,
-                'args': f'--num-gpu-blocks-override {size} '
-                f' --port {8000+i} '       
+                'args': f' --port {8000+i} '
                 f' --eviction_algorithm {alg} --max-num-batched-tokens 2048 '
             })
             i += 1
 
     
-    '''        {
+    ''' {
             'num_prompts': 10000,
             'session_rate': 20,
             'use_oracle': 1,
             'use_token_id': 1,
-            'algorithm': 'ml-true-token'
+            'algorithm': 'ml-true-oracle'
         },
         {
             'num_prompts': 10000,
             'session_rate': 20,
             'use_oracle': 2,
             'use_token_id': 1,
-            'algorithm': 'ml-oracle-token'
+            'algorithm': 'ml-belady'
         },'''
-    client_configs = []
     client_config_template = [
         {
-            'num_prompts': 50000,
+            'num_prompts': 30000,
             'use_oracle': 0,
             'use_token_id': 1,
             'algorithm': 'ml'
         },
         {
-            'num_prompts': 50000,
+            'num_prompts': 30000,
             'use_oracle': 0,
-            'use_token_id': 1,
+            'use_token_id': 0,
             'algorithm': 'lru'
         }
     ]
 
+    client_configs = []
     for conf in client_config_template:
         # c['max_active_conversations'] = conv_cnt
         c = copy.deepcopy(conf)
@@ -72,8 +73,8 @@ async def main(sizes, scales, alg, _dataset, tag):
             c['dataset_file'] = f'{DATA_HOME}/tay.json'
             c['request_rate'] = 1
             c['session_rate'] = 10
-            c['max_active_conversations'] = 300
-            c['time_limit'] = 600
+            c['max_active_conversations'] = 200
+            c['time_limit'] = 300
         elif _dataset.startswith('chatbot'):
             c['request_rate'] = 0.01
             c['max_active_conversations'] = 200
@@ -83,15 +84,22 @@ async def main(sizes, scales, alg, _dataset, tag):
         elif _dataset.startswith('lmsys'):
             c['request_rate'] = 0.01
             c['max_active_conversations'] = 200
-            c['checkpoint'] = f'{HOME}/vllm/benchmarks/checkpoints_lmsys-chat-1m/lmsys-chat-1m_epoch4_metric_0_6818.pt'
+            c['checkpoint'] = f'{HOME}/vllm/benchmarks/checkpoints_lmsys-chat-1m_20/lmsys-chat-1m_epoch11_metric_0_5797.pt'
             c['dataset_file'] = '"lmsys/lmsys-chat-1m"'
+            c['time_limit'] = 1200
+        elif _dataset.startswith('sharegpt*'):
+            c['request_rate'] = 0.01
+            c['max_active_conversations'] = 200
+            c['checkpoint'] = f'{HOME}/vllm/benchmarks/sharegpt_epoch17_metric_0_4482.pt'
+            c['dataset_file'] = f'{DATA_HOME}/ShareGPT.json'
             c['time_limit'] = 1200
         elif _dataset.startswith('sharegpt'):
             c['request_rate'] = 0.01
             c['max_active_conversations'] = 200
             c['checkpoint'] = f'{HOME}/vllm/benchmarks/checkpoints_sharegpt_20/sharegpt_epoch19_metric_0_5427.pt'
-            c['dataset_file'] = f'{DATA_HOME}/ShareGPT.json'
+            c['dataset_file'] = f'{DATA_HOME}/ShareGPT_V3_unfiltered_cleaned_split.json'
             c['time_limit'] = 1200
+        # c['max_active_conversations'] = 200
         c['dataset_name'] = _dataset
         client_configs.append(c)
 
@@ -100,6 +108,7 @@ async def main(sizes, scales, alg, _dataset, tag):
         os.makedirs(f'{DIR}/{_dataset}-{tag}', exist_ok=True)
         os.makedirs(f'{DIR}/{_dataset}-{tag}/client_logs', exist_ok=True)
         log_file_name = f"{DIR}/{_dataset}-{tag}/server_{server_config['port']}_{server_config['client_algorithm']}.log"
+        server_config['args'] += f"--num-gpu-blocks-override {server_config['size']} "
         server_cmd = VLLM_SERVER_CMD_TEMPLATE.format(server_config['args'])
 
         ssh_command = (
@@ -170,20 +179,23 @@ async def main(sizes, scales, alg, _dataset, tag):
             time_limit
         )
         client_cmd = f'{server_config["cuda_devices"]} {client_cmd}'
-        print("Running client command:", client_cmd)
         
-        process = await asyncio.create_subprocess_shell(
-            client_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+        while True:
+            print("Running client command:", client_cmd, flush=True)
+            process = await asyncio.create_subprocess_shell(
+                client_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
 
-        add_client_procs(process)  # <-- Don't overwrite process
-
-        stdout, stderr = await process.communicate()
-        log_file_name = f"{DIR}/{_dataset}-{tag}/client_{server_config['port']}_{client_config['algorithm']}.log"
-        log_file = open(log_file_name, "w")
-        print("Client stdout:", stdout.decode(), file=log_file)
+            stdout, stderr = await process.communicate()
+            log_file_name = f"{DIR}/{_dataset}-{tag}/client_{server_config['port']}_{client_config['algorithm']}.log"
+            log_file = open(log_file_name, "w")
+            print("Client stdout:", stdout.decode(), file=log_file)
+            print("Client error:", stderr.decode(), file=log_file)
+            if len(str(stdout.decode())) > 1000:
+                break
+        print('Done client: ' + client_cmd + '\n', flush=True)
         hit_ratios = []
         result = {}
         for line in stdout.decode().split("\n"):
@@ -204,7 +216,6 @@ async def main(sizes, scales, alg, _dataset, tag):
         
         with open(f'{DIR}/{result_filename}.config', 'w') as fp:
             json.dump([client_config, server_config], fp)
-        print('Done client: ' + client_cmd + '\n')
         result['hit_ratios'] = hit_ratios
         for k in ['args', 'size']:
             result[k] = server_config[k]
@@ -224,6 +235,8 @@ async def main(sizes, scales, alg, _dataset, tag):
         client_config = copy.deepcopy(client_conf)
         server_config = copy.deepcopy(server_conf)
         server_config['client_algorithm'] = client_config['algorithm']
+        if 'ml' in server_config['client_algorithm']:
+            server_config['size'] -= 250 # 1GB
         print("Starting server configuration:", server_config)
         await start_server(server_config)
         result = await run_client(client_config, server_config)
@@ -258,18 +271,22 @@ async def main(sizes, scales, alg, _dataset, tag):
         tasks = [start_exp(server_config, client_config) for server_config in server_configs]
         await asyncio.gather(*tasks)
 
+'''# varying chat interval
 if __name__ == "__main__":
-    for alg in ['ml']:
-        for dataset in ['lmsys', 'chatbot', 'sharegpt']: # 'chatbot200-nochunk', 'sharegpt200-nochunk', 'tay001', 'sharegpt200', 'lmsys200'
-            for sizes in [[10000]]: #13000, 20000, 24000, 28000, 32000   3000, 4000, 5000, 6000, 7000, 8000, 9000, 
-                for scales in [[0.5, 1, 2, 4]]:
-                    asyncio.run(main(sizes, scales, alg, dataset, 'reqrate'))
+    if '32B' in MODEL:
+        for alg in ['ml']:
+            for dataset in ['lmsys', 'chatbot', 'sharegpt', 'tay']:
+                for sizes in [[10000]]:
+                    for scales in [[0.25, 0.5, 1, 2]]:
+                        asyncio.run(main(sizes, scales, alg, dataset, 'reqrate++'))
 
 '''
+
+# varying cache size
 if __name__ == "__main__":
     for alg in ['ml']:
-        for dataset in ['lmsys', 'chatbot', 'sharegpt']: # 'chatbot200-nochunk', 'sharegpt200-nochunk', 'tay001', 'sharegpt200', 'lmsys200'
-            for sizes in [[3000, 5000, 7000, 10000]]: #13000, 20000, 24000, 28000, 32000   3000, 4000, 5000, 6000, 7000, 8000, 9000, 
+        for dataset in ['lmsys', 'chatbot', 'sharegpt']:
+            for sizes in [[4000, 6000], [8000, 10000]]:
                 for scales in [[1]]:
-                    asyncio.run(main(sizes, scales, alg, dataset, 'size'))
-'''
+                    asyncio.run(main(sizes, scales, alg, dataset, 'size++'))
+

@@ -12,8 +12,8 @@ HOME = '/home/dy5'
 DATA_HOME = '/scratch/gpfs/dy5/.cache/huggingface'
 SERVER_COMMAND_SUFFIX = "'"
 MODEL = "/scratch/gpfs/dy5/.cache/huggingface/hub/models--Qwen--Qwen2.5-0.5B/snapshots/060db6499f32faf8b98477b0a26969ef7d8b9987"
-MODEL = "/scratch/gpfs/dy5/.cache/huggingface/hub/models--Qwen--Qwen3-8B-FP8/snapshots/a29cae3df5d16cc895083497dad6ba9530c7d84c"
 MODEL = "/scratch/gpfs/dy5/.cache/huggingface/hub/models--Qwen--Qwen3-32B-FP8/snapshots/98a63908b41686889a6ade39c37616e54d49974d"
+#MODEL = "/scratch/gpfs/dy5/.cache/huggingface/hub/models--Qwen--Qwen3-8B-FP8/snapshots/a29cae3df5d16cc895083497dad6ba9530c7d84c"
 # download the sentence transformer model
 # ---della end---
 DIR = f"results/{MODEL.split('/')[-1]}"
