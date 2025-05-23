@@ -13,12 +13,16 @@ name = {'ml': 'LPC', 'lru': 'LRU', 'ml-true': 'Oracle'}
 def plot_dataset(file_path, y_label, x_label):
     with open(file_path, 'r') as file:
         data = json.load(file)
+    with open(file_path.replace('.json', '_0514.json'), 'r') as file:
+        data_0514 = json.load(file)
 
     # Collect all values: {(algorithm, x): [y1, y2, ...]}
     grouped_data = defaultdict(list)
     dataset_name = data[0]['dataset_name']
 
-    for config in data:
+    for config in data + data_0514:
+        if config['request_rate'] != 0.01:
+            continue
         if 'algorithm' in config:
             algorithm = config['algorithm']
             if 'true' in algorithm:
@@ -32,7 +36,7 @@ def plot_dataset(file_path, y_label, x_label):
             else:
                 y = float(config[y_label])
             grouped_data[(algorithm, x)].append(y)
-            print(algorithm, x, y)
+            # print(algorithm, x, y)
 
     # Aggregate values for plotting
     algo_series = defaultdict(lambda: {'x': [], 'y': [], 'yerr': []})
@@ -43,6 +47,7 @@ def plot_dataset(file_path, y_label, x_label):
         y_err = [[y_mean - y_min], [y_max - y_mean]]  # asymmetric error
         algo_series[algo]['x'].append(x)
         algo_series[algo]['y'].append(y_mean)
+        print(algo, len(ys), x/16, y_max - y_min, (y_max - y_min) / y_mean)
         algo_series[algo]['yerr'].append((y_mean - y_min, y_max - y_mean))
 
     # Plotting
@@ -73,18 +78,11 @@ def plot_dataset(file_path, y_label, x_label):
     plt.show()
 
 dir = 'results/98a63908b41686889a6ade39c37616e54d49974d/'
-# dir = 'results/a29cae3df5d16cc895083497dad6ba9530c7d84c'
-#dir = 'results/98a63908b41686889a6ade39c37616e54d49974d/result_Nconv=300_1'
 file_paths = [
-    f'{dir}/exp_lmsys_0514.json',
-    f'{dir}/exp_chatbot_0514.json',
-    f'{dir}/exp_sharegpt_0514.json',
-# f'{dir}/exp_sharegpt*.json',
+    f'{dir}/exp_lmsys.json',
+    f'{dir}/exp_chatbot.json',
+    f'{dir}/exp_sharegpt.json',
 ]
-#file_paths = [f'{dir}/exp_chatbot200.json',
-#f'{dir}/exp_sharegpt200.json',
-#f'{dir}/exp_lmsys200.json',
-#]
 
 for file_path in file_paths:
     plot_dataset(file_path, 'hit_ratios', 'size')

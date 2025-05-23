@@ -11,14 +11,14 @@ def plot_dataset(file_path, y_label):
     algorithm_data = {}
     for config in data:
     # for config in reversed(data):
-        #if config['request_rate'] != 0.01:
-        #    continue
         if 'algorithm' in config:
             algorithm = config['algorithm']
             if 'true' in algorithm:
                 continue
         x = config['request_rate']
         if x > 0.02:
+            continue
+        if x < 0.0025:
             continue
         # print(config['size'])
         x = 1 / x
@@ -73,10 +73,9 @@ def plot_dataset(file_path, y_label):
 dir = 'results/98a63908b41686889a6ade39c37616e54d49974d/'
 # dir = 'results/a29cae3df5d16cc895083497dad6ba9530c7d84c'
 file_paths = [
-f'{dir}/exp_sharegpt.json',
-# f'{dir}/exp_tay.json',
-f'{dir}/exp_lmsys.json',
-f'{dir}/exp_chatbot.json',
+f'{dir}/exp_sharegpt_reqrate.json',
+f'{dir}/exp_lmsys_reqrate.json',
+f'{dir}/exp_chatbot_reqrate.json',
 ]
 for file_path in file_paths:
     plot_dataset(file_path, 'hit_ratios')

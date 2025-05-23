@@ -17,10 +17,10 @@ def plot_dataset(file_path, y_label, x_label):
             if 'true' in algorithm:
                 continue
         x = config[x_label]
-        # ml uses a smaller cache size to account for the 1GB overhead (250 tokens)
-        # When we plot the total memory usage, we add this 1GB back
-        if algorithm == 'ml':
+        # add extra memory overhead for ml
+        if 'ml' in algorithm:
             x += 250
+        # number of tokens in the cache
         x = x * 16 / 1000
         if algorithm not in algorithm_data or x not in algorithm_data[algorithm]['xs']:
             if y_label == 'hit_ratios':
@@ -77,7 +77,6 @@ file_paths = [
     f'{dir}/exp_lmsys_0514.json',
     f'{dir}/exp_chatbot_0514.json',
     f'{dir}/exp_sharegpt_0514.json',
-# f'{dir}/exp_sharegpt*.json',
 ]
 #file_paths = [f'{dir}/exp_chatbot200.json',
 #f'{dir}/exp_sharegpt200.json',

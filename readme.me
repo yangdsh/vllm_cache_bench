@@ -6,11 +6,12 @@ cd vllm
 VLLM_USE_PRECOMPILED=1 pip install --editable .
 
 # run
-python3 run_della.py
+python run_nips.py
 
-# plot
+# plot main results
 python plot_size.py
 python plot_reqrate.py
-python throughput.py
-python ttft.py
-python true_line.py
+python plot_throughput.py
+python plot_ttft.py
+python plot_true_line.py
+python get_predictor_accuracy.py

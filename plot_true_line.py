@@ -10,13 +10,16 @@ def plot_dataset(file_path, y_label, x_label):
     # Organize data by eviction algorithm
     algorithm_data = {}
     for config in data:
-        #if config['request_rate'] != 0.01:
-        #    continue
+        if config['request_rate'] != 0.01:
+            continue
         if 'algorithm' in config:
             algorithm = config['algorithm']
-            if 'true' not in algorithm and 'lru' not in algorithm:
-                continue
-        x = config[x_label] * 16 / 1000
+        x = config[x_label]
+        # add extra memory overhead for ml
+        if 'ml' in algorithm:
+            x += 250
+        # number of tokens in the cache
+        x = x * 16 / 1000
         if algorithm not in algorithm_data or x not in algorithm_data[algorithm]['xs']:
             if y_label == 'hit_ratios':
                 y = float(config[y_label][-1])
@@ -33,11 +36,12 @@ def plot_dataset(file_path, y_label, x_label):
 
     # Plotting
     plt.figure(figsize=(3.5, 2.7))
-    for algorithm, values in algorithm_data.items():
+    for algorithm in ['lru', 'ml', 'ml-true']:
+        values = algorithm_data[algorithm]
         sorted_pairs = sorted(zip(values['xs'], values[y_label]))
         xs_sorted, ys_sorted = zip(*sorted_pairs)
         print(algorithm, ys_sorted)
-        plt.plot(xs_sorted, ys_sorted, marker='o', label=name[algorithm])
+        plt.plot(xs_sorted[0:], ys_sorted[0:], marker='o', label=name[algorithm])
 
     plt.ylim(bottom=0)
     # plt.ylim(top=0.5)
@@ -61,16 +65,10 @@ def plot_dataset(file_path, y_label, x_label):
 
 dir = 'results/98a63908b41686889a6ade39c37616e54d49974d/'
 # dir = 'results/a29cae3df5d16cc895083497dad6ba9530c7d84c'
-dir = 'results/98a63908b41686889a6ade39c37616e54d49974d/result_Nconv=300_1'
+# dir = 'results/98a63908b41686889a6ade39c37616e54d49974d/result_Nconv=300_1'
 file_paths = [f'{dir}/exp_chatbot.json',
 f'{dir}/exp_sharegpt.json',
-# f'{dir}/exp_sharegpt*.json',
 f'{dir}/exp_lmsys.json',
-]
-file_paths = [f'{dir}/exp_chatbot200.json',
-f'{dir}/exp_sharegpt200.json',
-# f'{dir}/exp_sharegpt*.json',
-f'{dir}/exp_lmsys200.json',
 ]
 
 for file_path in file_paths:

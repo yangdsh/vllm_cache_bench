@@ -4,7 +4,7 @@ import io
 import os
 import numpy as np
 
-# Data provided by the user
+# Data measured in microbenchmark
 csv_data = """hit_ratio,time
 55,7.17
 46,8.44
