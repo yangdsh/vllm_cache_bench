@@ -6,9 +6,15 @@ from utils import kill_server, kill_proc_on_port, add_proc, add_client_procs
 import os
 import re
 import copy
-from constants_della import *
+from constants import *
+import argparse
 
 async def main(sizes, scales, alg, _dataset, tag):
+    if 'online' in alg:
+        eviction_algorithm_config = {"enable_online_learning": 1}
+    else:
+        eviction_algorithm_config = {"enable_online_learning": 0}
+    eviction_algorithm_config = json.dumps(eviction_algorithm_config)
     server_configs = []
     i = 0
     for size in sizes:
@@ -19,16 +25,24 @@ async def main(sizes, scales, alg, _dataset, tag):
                 else:
                     cuda_device_id = i+1
             else:
-                cuda_device_id = ''
+                if ENV == 'della':
+                    cuda_device_id = ','.join(map(str, range(i, i+4)))
+                else:
+                    cuda_device_id = '1,2,3,4'
+
+            args = f' --port {8000+i} --eviction_algorithm {alg} --max-num-batched-tokens 2048 '
+            if ENV != 'della':
+                 args += (f'--num-gpu-blocks-override {size} '
+                          f" --eviction_algorithm_config '{eviction_algorithm_config}'")
+
             server_configs.append({'host': 'localhost', 
                 'cuda_devices': f'CUDA_VISIBLE_DEVICES={cuda_device_id}',
                 'eviction_algorithm': alg,
+                'eviction_algorithm_config': eviction_algorithm_config,
                 'port': 8000+i,
                 'size': size,
                 'scale': scale,
-                'args': f'--num-gpu-blocks-override {size} '
-                f' --port {8000+i} '       
-                f' --eviction_algorithm {alg} --max-num-batched-tokens 2048 '
+                'args': args
             })
             i += 1
 
@@ -46,25 +60,38 @@ async def main(sizes, scales, alg, _dataset, tag):
             'use_oracle': 2,
             'use_token_id': 1,
             'algorithm': 'ml-oracle-token'
-        },'''
-    client_configs = []
-    client_config_template = [
-        {
-            'num_prompts': 50000,
-            'use_oracle': 0,
-            'use_token_id': 1,
-            'algorithm': 'ml'
         },
         {
             'num_prompts': 50000,
             'use_oracle': 0,
-            'use_token_id': 1,
+            'use_token_id': 0,
             'algorithm': 'lru'
-        }
-    ]
+        }'''
+    client_configs = []
+    
+    if ENV == 'della':
+        client_config_template = [
+            {
+                'num_prompts': 30000,
+                'use_oracle': 0,
+                'use_token_id': 1,
+                'algorithm': ''
+            }
+        ]
+    else:
+        client_config_template = [
+            {
+                'num_prompts': 30000,
+                'use_oracle': 0,
+                'use_token_id': 1,
+                'algorithm': ''
+            }
+        ]
+
 
     for conf in client_config_template:
-        # c['max_active_conversations'] = conv_cnt
+        if conf['algorithm'] == '':
+            conf['algorithm'] = alg
         c = copy.deepcopy(conf)
         c['session_rate'] = 10
         if _dataset.startswith('tay'):
@@ -72,8 +99,8 @@ async def main(sizes, scales, alg, _dataset, tag):
             c['dataset_file'] = f'{DATA_HOME}/tay.json'
             c['request_rate'] = 1
             c['session_rate'] = 10
-            c['max_active_conversations'] = 300
-            c['time_limit'] = 600
+            c['max_active_conversations'] = 200
+            c['time_limit'] = 300 if ENV == 'della' else 600
         elif _dataset.startswith('chatbot'):
             c['request_rate'] = 0.01
             c['max_active_conversations'] = 200
@@ -83,16 +110,20 @@ async def main(sizes, scales, alg, _dataset, tag):
         elif _dataset.startswith('lmsys'):
             c['request_rate'] = 0.01
             c['max_active_conversations'] = 200
-            c['checkpoint'] = f'{HOME}/vllm/benchmarks/checkpoints_lmsys-chat-1m/lmsys-chat-1m_epoch4_metric_0_6818.pt'
+            c['checkpoint'] = f'{HOME}/vllm/benchmarks/checkpoints_lmsys-chat-1m_20/lmsys-chat-1m_epoch11_metric_0_5797.pt'
             c['dataset_file'] = '"lmsys/lmsys-chat-1m"'
             c['time_limit'] = 1200
         elif _dataset.startswith('sharegpt'):
             c['request_rate'] = 0.01
             c['max_active_conversations'] = 200
             c['checkpoint'] = f'{HOME}/vllm/benchmarks/checkpoints_sharegpt_20/sharegpt_epoch19_metric_0_5427.pt'
-            c['dataset_file'] = f'{DATA_HOME}/ShareGPT.json'
+            c['dataset_file'] = f'{DATA_HOME}/ShareGPT_V3_unfiltered_cleaned_split.json'
             c['time_limit'] = 1200
-        c['dataset_name'] = _dataset
+        if ENV == 'della':
+            c['dataset_name'] = _dataset
+        else:
+            c['dataset_name'] = _dataset + '-online'
+        # c['max_active_conversations'] = 50
         client_configs.append(c)
 
     def run_server(server_config):
@@ -100,6 +131,10 @@ async def main(sizes, scales, alg, _dataset, tag):
         os.makedirs(f'{DIR}/{_dataset}-{tag}', exist_ok=True)
         os.makedirs(f'{DIR}/{_dataset}-{tag}/client_logs', exist_ok=True)
         log_file_name = f"{DIR}/{_dataset}-{tag}/server_{server_config['port']}_{server_config['client_algorithm']}.log"
+        
+        if ENV == 'della':
+            server_config['args'] += f"--num-gpu-blocks-override {server_config['size']} "
+
         server_cmd = VLLM_SERVER_CMD_TEMPLATE.format(server_config['args'])
 
         ssh_command = (
@@ -110,8 +145,12 @@ async def main(sizes, scales, alg, _dataset, tag):
         )
         print('\n', ssh_command, '\n')
         with open(log_file_name, "w") as log_file:
-            process = subprocess.Popen(ssh_command, shell=True, stdout=log_file, stderr=log_file)
-            add_proc(server_config['port'], process)
+            popen_kwargs = {"shell": True, "stdout": log_file, "stderr": log_file}
+            if ENV == 'della':
+                popen_kwargs["executable"] = "/bin/bash"
+            process = subprocess.Popen(ssh_command, **popen_kwargs)
+            if ENV != 'della':
+                add_proc(server_config['port'], process)
 
         return log_file_name
 
@@ -169,21 +208,43 @@ async def main(sizes, scales, alg, _dataset, tag):
             checkpoint, use_oracle, use_token_id, use_lru, max_active_conversations,
             time_limit
         )
-        client_cmd = f'{server_config["cuda_devices"]} {client_cmd}'
-        print("Running client command:", client_cmd)
         
-        process = await asyncio.create_subprocess_shell(
-            client_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+        if ENV == 'della':
+            client_cmd = f'{server_config["cuda_devices"]} {client_cmd}'
+        else:
+            client_cmd = f'{client_cmd}'
 
-        add_client_procs(process)  # <-- Don't overwrite process
+        async def exec_client():
+            print("Running client command:", client_cmd, flush=True)
+            
+            process = await asyncio.create_subprocess_shell(
+                client_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
 
-        stdout, stderr = await process.communicate()
-        log_file_name = f"{DIR}/{_dataset}-{tag}/client_{server_config['port']}_{client_config['algorithm']}.log"
-        log_file = open(log_file_name, "w")
-        print("Client stdout:", stdout.decode(), file=log_file)
+            if ENV != 'della':
+                add_client_procs(process)
+
+            stdout, stderr = await process.communicate()
+            
+            log_file_name = f"{DIR}/{_dataset}-{tag}/client_{server_config['port']}_{client_config['algorithm']}.log"
+            with open(log_file_name, "w") as log_file:
+                print("Client stdout:", stdout.decode(), file=log_file)
+                if ENV == 'della':
+                    print("Client error:", stderr.decode(), file=log_file)
+            
+            print('Done client: ' + client_cmd + '\n', flush=True)
+            return stdout, stderr
+
+        if ENV == 'della':
+            while True:
+                stdout, stderr = await exec_client()
+                if len(stdout.decode()) > 1000:
+                    break
+        else:
+            stdout, stderr = await exec_client()
+
         hit_ratios = []
         result = {}
         for line in stdout.decode().split("\n"):
@@ -224,8 +285,14 @@ async def main(sizes, scales, alg, _dataset, tag):
         client_config = copy.deepcopy(client_conf)
         server_config = copy.deepcopy(server_conf)
         server_config['client_algorithm'] = client_config['algorithm']
+        if ENV == 'della' and 'ml' in server_config['client_algorithm']:
+            server_config['size'] -= 250 # 2GB
         print("Starting server configuration:", server_config)
-        await start_server(server_config)
+        is_ready = await start_server(server_config)
+        if not is_ready:
+            if ENV == 'della':
+                 print("Server startup failed. Skipping this experiment.")
+            return
         result = await run_client(client_config, server_config)
         dataset_name = client_config['dataset_name']
 
@@ -245,7 +312,8 @@ async def main(sizes, scales, alg, _dataset, tag):
             existing_data = []
 
         # Append new results
-        existing_data.append(result)
+        if ENV == 'della' or len(result['hit_ratios']) > 0:
+            existing_data.append(result)
 
         # Write back to the file
         with open(exp_file, "w") as fp:
@@ -258,18 +326,38 @@ async def main(sizes, scales, alg, _dataset, tag):
         tasks = [start_exp(server_config, client_config) for server_config in server_configs]
         await asyncio.gather(*tasks)
 
-if __name__ == "__main__":
-    for alg in ['ml']:
-        for dataset in ['lmsys', 'chatbot', 'sharegpt']: # 'chatbot200-nochunk', 'sharegpt200-nochunk', 'tay001', 'sharegpt200', 'lmsys200'
-            for sizes in [[10000]]: #13000, 20000, 24000, 28000, 32000   3000, 4000, 5000, 6000, 7000, 8000, 9000, 
-                for scales in [[0.5, 1, 2, 4]]:
-                    asyncio.run(main(sizes, scales, alg, dataset, 'reqrate'))
 
-'''
 if __name__ == "__main__":
-    for alg in ['ml']:
-        for dataset in ['lmsys', 'chatbot', 'sharegpt']: # 'chatbot200-nochunk', 'sharegpt200-nochunk', 'tay001', 'sharegpt200', 'lmsys200'
-            for sizes in [[3000, 5000, 7000, 10000]]: #13000, 20000, 24000, 28000, 32000   3000, 4000, 5000, 6000, 7000, 8000, 9000, 
-                for scales in [[1]]:
-                    asyncio.run(main(sizes, scales, alg, dataset, 'size'))
-'''
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--exp", type=str, default="fat2_online", 
+                        choices=["fat2_online", "fat2_size", "della_reqrate", "della_size"],
+                        help="The experiment to run.")
+    args = parser.parse_args()
+
+    if args.exp == "fat2_online":
+        for alg in ['ml', 'lru', 'ml-online']:
+            for dataset in ['lmsys']: #  'chatbot', 'sharegpt'
+                for sizes in [[4000, 7000, 10000, 13000, 16000]]: #13000, 20000, 24000, 28000, 32000   3000, 4000, 5000, 6000, 7000, 8000, 9000, 
+                    for scales in [[1]]:
+                        asyncio.run(main(sizes, scales, alg, dataset, 'size-online'))
+    elif args.exp == "fat2_size":
+        for alg in ['ml']:
+            for dataset in ['lmsys', 'chatbot', 'sharegpt']: # 'chatbot200-nochunk', 'sharegpt200-nochunk', 'tay001', 'sharegpt200', 'lmsys200'
+                for sizes in [[3000, 5000, 7000, 10000]]: #13000, 20000, 24000, 28000, 32000   3000, 4000, 5000, 6000, 7000, 8000, 9000, 
+                    for scales in [[1]]:
+                        asyncio.run(main(sizes, scales, alg, dataset, 'size'))
+    elif args.exp == "della_reqrate":
+        # from run_della.py: # varying chat interval
+        if '32B' in MODEL:
+            for alg in ['ml']:
+                for dataset in ['lmsys', 'chatbot', 'sharegpt', 'tay']:
+                    for sizes in [[10000]]:
+                        for scales in [[0.25, 0.5, 1, 2]]:
+                            asyncio.run(main(sizes, scales, alg, dataset, 'reqrate++'))
+    elif args.exp == "della_size":
+        # from run_della.py: # varying cache size
+        for alg in ['ml']:
+            for dataset in ['sharegpt', 'lmsys', 'chatbot']:
+                for sizes in [[4000], [6000], [8000], [10000]]:
+                    for scales in [[1]]:
+                        asyncio.run(main(sizes, scales, alg, dataset, 'size++'))
