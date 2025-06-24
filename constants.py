@@ -32,8 +32,8 @@ os.makedirs(f'{DIR}/metrics', exist_ok=True)
 VLLM_SERVER_CMD_TEMPLATE = (
     # "/usr/local/bin/nsys profile -o /tmp/0.nsys-rep -w true -t cuda,nvtx,osrt,cudnn,cublas 
     # -s cpu -f true -x false --duration=120 --cuda-graph-trace node " TRANSFORMERS_OFFLINE=1 
-    f"VLLM_SERVER_DEV_MODE=1 VLLM_LOGGING_LEVEL=INFO"
-    f" vllm serve {MODEL} --dtype half --gpu_memory_utilization 0.95 --disable-log-requests "
+    f"VLLM_SERVER_DEV_MODE=1 VLLM_LOGGING_LEVEL=INFO PYTHONUNBUFFERED=1 "
+    f" vllm serve {MODEL} --dtype half --gpu_memory_utilization 0.95 --disable-log-requests --uvicorn-log-level warning "
     "--max_num_seqs 512 --num-scheduler-steps 1 --max-model-len 16384 --disable_custom_all_reduce "
     f"--enable-chunked-prefill --enable-prefix-caching --pipeline-parallel-size 1 " # --no-enable-prefix-caching
     "{} "
