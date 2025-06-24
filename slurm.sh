@@ -3,12 +3,12 @@
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks=1               # total number of tasks across all nodes
 #SBATCH --cpus-per-task=4        # cpu-cores per task (>1 if multi-threaded tasks)
-#SBATCH --mem=64G                # memory
-#SBATCH --gres=gpu:1           # number of gpus per node
+#SBATCH --mem=128G                # memory
+#SBATCH --gres=gpu:4           # number of gpus per node
 #SBATCH --time=5:19:00          # total run time limit (HH:MM:SS)
 #SBATCH --mail-type=begin        # send email when job begins
 #SBATCH --mail-type=end          # send email when job ends
-#SBATCH --mail-user=xxx@xxx.edu
+#SBATCH --mail-user=dy5@princeton.edu
 #SBATCH --partition=pli
 #SBATCH --account=prefixcache
 
@@ -16,7 +16,7 @@ module purge
 module load anaconda3/2024.6
 conda activate vllm-cuda121
 cd /home/dy5/vllm_cache_bench
-python3 run_nips.py
+python3 run.py
 
 #sbatch slurm.sh
 #conda env create -f environment.yml

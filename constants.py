@@ -1,18 +1,17 @@
 import os
 
-ENV = os.getenv('ENV', 'fat2')
+ENV = os.getenv('ENV', 'della')
 
 if ENV == 'della':
     # ---della begin---
     SERVER_COMMAND_PREFIX = (
-        f"bash -c '"
         f"export HF_HOME=/scratch/gpfs/dy5/.cache/huggingface/ && "
         f"source /usr/licensed/anaconda3/2024.6/etc/profile.d/conda.sh && "
         f"conda activate vllm-cuda121 && "
     )
     HOME = '/home/dy5'
     DATA_HOME = '/scratch/gpfs/dy5/.cache/huggingface'
-    SERVER_COMMAND_SUFFIX = "'"
+    SERVER_COMMAND_SUFFIX = ""
     MODEL = "/scratch/gpfs/dy5/.cache/huggingface/hub/models--Qwen--Qwen3-32B-FP8/snapshots/98a63908b41686889a6ade39c37616e54d49974d"
     # ---della end---
 else: # fat2
