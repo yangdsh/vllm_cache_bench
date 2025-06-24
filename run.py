@@ -81,7 +81,7 @@ async def main(sizes, scales, alg, _dataset, tag):
         if conf['algorithm'] == '':
             conf['algorithm'] = alg
         c = copy.deepcopy(conf)
-        c['session_rate'] = 10
+        c['session_rate'] = 5
         if _dataset.startswith('tay'):
             c['checkpoint'] = f'{HOME}/vllm/benchmarks/checkpoints_tay_20/tay_epoch17_metric_0_6332.pt'
             c['dataset_file'] = f'{DATA_HOME}/tay.json'
@@ -108,7 +108,8 @@ async def main(sizes, scales, alg, _dataset, tag):
             c['dataset_file'] = f'{DATA_HOME}/ShareGPT_V3_unfiltered_cleaned_split.json'
             c['time_limit'] = 1200
         c['dataset_name'] = _dataset
-        c['time_limit'] = 3600
+        c['max_active_conversations'] = 200
+        c['time_limit'] = 1200
         client_configs.append(c)
 
     def run_server(server_config):
@@ -215,10 +216,13 @@ async def main(sizes, scales, alg, _dataset, tag):
         stdout, stderr = await exec_client()
 
         hit_ratios = []
+        prompt_tokens = []
         result = {}
         for line in stdout.decode().split("\n"):
             if 'gpu_prefix_cache_hit_rate' in line:
                 hit_ratios.append(line.split()[-1])
+            if 'vllm:prompt_tokens_total' in line:
+                prompt_tokens.append(line.split()[-1])
             if 'Mean TTFT (ms):' in line:
                 result['mean_ttft'] = line.split()[-1]
             if 'Median TTFT (ms):' in line:
@@ -236,6 +240,7 @@ async def main(sizes, scales, alg, _dataset, tag):
             json.dump([client_config, server_config], fp)
         print('Done client: ' + client_cmd + '\n')
         result['hit_ratios'] = hit_ratios
+        result['prompt_tokens'] = prompt_tokens
         for k in ['args', 'size']:
             result[k] = server_config[k]
         for k in client_config.keys():
@@ -259,14 +264,14 @@ async def main(sizes, scales, alg, _dataset, tag):
             server_config['size'] -= 250 # 2GB
         
         if 'online' in server_config['eviction_algorithm']:
-            eac = {"enable_online_learning": 1, "learning_rate": 1e-4}
+            if 'finetune' in server_config['client_algorithm']:
+                eac = {"enable_online_learning": 1, "learning_rate": 1e-4, 
+                "model_path": client_config['checkpoint']}
+            else:
+                eac = {"enable_online_learning": 1, "learning_rate": 1e-3}
         else:
-            eac = {"enable_online_learning": 0}
-        if 'online' not in server_config['eviction_algorithm'] or \
-        'finetune' in server_config['client_algorithm']:
-            if 'checkpoint' in client_config:
-                eac['model_path'] = client_config['checkpoint']
-        
+            eac = {"enable_online_learning": 0, "model_path": client_config['checkpoint']}
+
         eviction_algorithm_config_str = json.dumps(eac)
 
         args = (f'--port {server_config["port"]} '
@@ -343,8 +348,8 @@ if __name__ == "__main__":
                         asyncio.run(main(sizes, scales, alg, dataset, 'reqrate++'))
     elif args.exp == "della_size":
         # from run_della.py: # varying cache size
-        for dataset in ['lmsys']: # , 'chatbot', 'sharegpt'
-            for alg in ['ml-online-finetune']: # , 'ml', 'lru'
+        for dataset in ['sharegpt', 'lmsys', 'chatbot']: # , 
+            for alg in ['ml-online-finetune', 'ml', 'lru', 'ml-online']: # 
                 for sizes in [[4000, 6000, 8000, 10000]]:
                     for scales in [[1]]:
                         asyncio.run(main(sizes, scales, alg, dataset, 'size-online'))
