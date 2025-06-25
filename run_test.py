@@ -26,7 +26,7 @@ VLLM_SERVER_CMD_TEMPLATE = (
 if "0.5B" not in MODEL:
     VLLM_SERVER_CMD_TEMPLATE += " --tensor-parallel-size 4 "
 CLIENT_CMD_TEMPLATE = (
-    f"python ~/vllm/benchmarks/benchmark_serving.py --result-dir {DIR} "
+    f"PYTHONUNBUFFERED=1 python ~/vllm/benchmarks/benchmark_serving.py --result-dir {DIR} "
     "--save-result --model {} --endpoint /v1/chat/completions "
     "--dataset-path {} --dataset-name {} --host {} --port {} "
     "--result-filename {} --num-prompts {} --request-rate {} --session-rate {} "
