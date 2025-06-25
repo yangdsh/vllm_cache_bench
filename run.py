@@ -25,27 +25,42 @@ def build_server_cmd(config):
 
 
 def build_client_cmd(config):
-    """Construct the client command string from config using a single args string."""
-    args = (
-        f"--result-dir {DIR} "
-        f"--save-result "
-        f"--model {MODEL} "
-        f"--endpoint /v1/chat/completions "
-        f"--dataset-path {config['dataset_file']} "
-        f"--dataset-name conversation "
-        f"--host {config['host']} "
-        f"--port {config['port']} "
-        f"--result-filename {config['result_filename']} "
-        f"--num-prompts {config['num_prompts']} "
-        f"--request-rate {config['request_rate']} "
-        f"--session-rate {config['session_rate']} "
-        f"--checkpoint {config['checkpoint']} "
-        f"--use-oracle {config['use_oracle']} "
-        f"--use-token-id {config['use_token_id']} "
-        f"--use-lru {config['use_lru']} "
-        f"--max-active-conversations {config['max_active_conversations']} "
-        f"--time-limit {config['time_limit']} "
-    )
+    """Construct the client command string from config using a dictionary."""
+    all_args = {
+        # Fixed arguments from constants
+        'result-dir': DIR,
+        'model': MODEL,
+        'endpoint': '/v1/chat/completions',
+        
+        # Arguments from the config dictionary
+        'dataset-path': config['dataset_file'],
+        'dataset-name': 'conversation',
+        'host': config['host'],
+        'port': config['port'],
+        'result-filename': config['result_filename'],
+        'num-prompts': config['num_prompts'],
+        'request-rate': config['request_rate'],
+        'session-rate': config['session_rate'],
+        'checkpoint': config['checkpoint'],
+        'use-oracle': config['use_oracle'],
+        'use-token-id': config['use_token_id'],
+        'use-lru': config['use_lru'],
+        'max-active-conversations': config['max_active_conversations'],
+        'time-limit': config['time_limit'],
+
+        # Flags that don't take values
+        'save-result': None,
+    }
+
+    # Build client args using loop
+    client_args_list = []
+    for arg_name, arg_value in all_args.items():
+        if arg_value is None:
+            client_args_list.append(f"--{arg_name}")
+        else:
+            client_args_list.append(f"--{arg_name} {arg_value}")
+    
+    args = " ".join(client_args_list)
     return CLIENT_CMD_TEMPLATE.format(args=args)
 
 
@@ -78,7 +93,7 @@ def prepare_configs(sizes, scales, alg, dataset, tag):
                 'use_oracle': 0,
                 'use_token_id': 1,
                 'max_active_conversations': 200,
-                'time_limit': 20,
+                'time_limit': 2400,
                 'dataset_name': dataset,
                 'tag': tag,
                 'request_rate': 1.0 # Default request rate
@@ -121,9 +136,9 @@ def prepare_configs(sizes, scales, alg, dataset, tag):
             # Eviction algorithm config
             if 'online' in base['eviction_algorithm']:
                 if 'finetune' in base['algorithm']:
-                    base['eviction_algorithm_config'] = {"enable_online_learning": 1, "learning_rate": 1e-4, "model_path": base['checkpoint']}
+                    base['eviction_algorithm_config'] = {"enable_online_learning": 1, "learning_rate": 1e-3, "model_path": base['checkpoint']}
                 else:
-                    base['eviction_algorithm_config'] = {"enable_online_learning": 1, "learning_rate": 1e-3}
+                    base['eviction_algorithm_config'] = {"enable_online_learning": 1, "learning_rate": 1e-3, "min_batch_size": 32}
             else:
                 base['eviction_algorithm_config'] = {"enable_online_learning": 0, "model_path": base['checkpoint']}
             configs.append(base)
@@ -302,8 +317,7 @@ async def main(sizes, scales, alg, dataset, tag):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--exp", type=str, default="della_size", 
-                        choices=["fat2_online", "fat2_size", "della_reqrate", "della_size"],
+    parser.add_argument("--exp", type=str, default="size-8b", 
                         help="The experiment to run.")
     args = parser.parse_args()
 
@@ -313,12 +327,12 @@ if __name__ == "__main__":
                 for sizes in [[4000, 7000, 10000, 13000, 16000]]:
                     for scales in [[1]]:
                         asyncio.run(main(sizes, scales, alg, dataset, 'size-online'))
-    elif args.exp == "fat2_size":
-        for alg in ['ml']:
+    elif args.exp == "size-8b":
+        for alg in ['ml-online-finetune', 'ml', 'lru', 'ml-online']:
             for dataset in ['lmsys', 'chatbot', 'sharegpt']:
-                for sizes in [[3000, 5000, 7000, 10000]]:
+                for sizes in [[5000, 10000, 15000, 20000]]:
                     for scales in [[1]]:
-                        asyncio.run(main(sizes, scales, alg, dataset, 'size'))
+                        asyncio.run(main(sizes, scales, alg, dataset, 'size-8b'))
     elif args.exp == "della_reqrate":
         for alg in ['ml']:
             for dataset in ['lmsys', 'chatbot', 'sharegpt', 'tay']:

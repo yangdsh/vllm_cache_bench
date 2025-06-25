@@ -1,5 +1,18 @@
 import os
 
+# Auto-detect environment based on current working directory
+def detect_environment():
+    current_dir = os.getcwd()
+    if 'dy5' in current_dir:
+        return 'della'
+    elif 'dongshengy' in current_dir:
+        return 'fat2'
+    elif 'ubuntu' in current_dir:
+        return 'ec2'
+    else:
+        # Default fallback, you can also raise an exception if preferred
+        return 'della'
+
 # Environment configuration dictionary for easy extension
 ENV_CONFIGS = {
     'della': {
@@ -11,7 +24,8 @@ ENV_CONFIGS = {
         'HOME': '/home/dy5',
         'DATA_HOME': '/scratch/gpfs/dy5/.cache/huggingface',
         'SERVER_COMMAND_SUFFIX': "",
-        'MODEL': "/scratch/gpfs/dy5/.cache/huggingface/hub/models--Qwen--Qwen3-32B-FP8/snapshots/98a63908b41686889a6ade39c37616e54d49974d"
+        'MODEL': "/scratch/gpfs/dy5/.cache/huggingface/hub/models--Qwen--Qwen3-8B-FP8/snapshots/a29cae3df5d16cc895083497dad6ba9530c7d84c"
+        # "/scratch/gpfs/dy5/.cache/huggingface/hub/models--Qwen--Qwen3-32B-FP8/snapshots/98a63908b41686889a6ade39c37616e54d49974d"
     },
     'fat2': {
         'SERVER_COMMAND_PREFIX': "",
@@ -19,10 +33,18 @@ ENV_CONFIGS = {
         'DATA_HOME': '/data/dongshengy',
         'SERVER_COMMAND_SUFFIX': "",
         'MODEL': "Qwen/Qwen2.5-0.5B-Instruct"
+    },
+    'ec2': {
+        'SERVER_COMMAND_PREFIX': "",
+        'HOME': '/home/ubuntu',
+        'DATA_HOME': '/home/ubuntu',
+        'SERVER_COMMAND_SUFFIX': "",
+        'MODEL': "/home/ubuntu/.cache/huggingface/hub/models--Qwen--Qwen3-8B-FP8/snapshots/2df580c02b343307b00ccd91309e67ec5a89987a9"
     }
 }
 
-ENV = os.getenv('ENV', 'della')
+# Use environment variable if set, otherwise auto-detect
+ENV = os.getenv('ENV', detect_environment())
 CONFIG = ENV_CONFIGS[ENV]
 
 SERVER_COMMAND_PREFIX = CONFIG['SERVER_COMMAND_PREFIX']
