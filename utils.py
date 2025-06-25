@@ -77,12 +77,28 @@ def is_port_in_use(port, host=None):
         return False
 
 def kill_server(host):
-    """Kill any running server process."""
+    """Kill all processes using the GPUs on a host."""
     try:
-        user = os.getenv("USER")
-        subprocess.run(["pkill", "-u", user, "-f", "vllm"])
-        print("Killed any running 'vllm serve' process.")
+        # Command to find and kill all processes running on NVIDIA GPUs.
+        # It first checks if nvidia-smi command exists.
+        # Then, it gets the PIDs of GPU processes.
+        # If any PIDs are found, it attempts to kill them with SIGKILL.
+        kill_cmd = (
+            "if command -v nvidia-smi &> /dev/null; then "
+            "pids=$(nvidia-smi --query-compute-apps=pid --format=csv,noheader); "
+            "if [ -n \"$pids\" ]; then "
+            "echo \"$pids\" | xargs -r kill -9; "
+            "fi; "
+            "fi"
+        )
+        host = ""
+        if host:
+            subprocess.run(["ssh", host, kill_cmd], check=True)
+            print(f"Killed any processes using GPUs on {host}.")
+        else:
+            subprocess.run(kill_cmd, shell=True, check=True)
+            print("Killed any processes using GPUs on the local machine.")
     except subprocess.CalledProcessError as e:
-        print("No 'vllm serve' processes were running:", e)
+        print(f"No processes to kill or an error occurred: {e}")
 
     time.sleep(5)

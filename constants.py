@@ -35,11 +35,15 @@ ENV_CONFIGS = {
         'MODEL': "Qwen/Qwen2.5-0.5B-Instruct"
     },
     'ec2': {
-        'SERVER_COMMAND_PREFIX': "",
+        'SERVER_COMMAND_PREFIX': (
+            "LMCACHE_CHUNK_SIZE=256 "
+            "LMCACHE_LOCAL_CPU=True "
+            "LMCACHE_MAX_LOCAL_CPU_SIZE=80.0 "
+        ),
         'HOME': '/home/ubuntu',
-        'DATA_HOME': '/home/ubuntu',
+        'DATA_HOME': '/home/ubuntu/vllm_cache_bench',
         'SERVER_COMMAND_SUFFIX': "",
-        'MODEL': "/home/ubuntu/.cache/huggingface/hub/models--Qwen--Qwen3-8B-FP8/snapshots/2df580c02b343307b00ccd91309e67ec5a89987a9"
+        'MODEL': "/home/ubuntu/.cache/huggingface/hub/models--Qwen--Qwen3-8B-FP8/snapshots/2df580c02b34307b00ccd91309e67ec5a89987a9"
     }
 }
 
@@ -77,7 +81,10 @@ CLIENT_CMD_TEMPLATE = (
     "PYTHONUNBUFFERED=1 python ~/vllm/benchmarks/benchmark_serving.py {args} "
 )
 
-SERVER_READY_PATTERN = r"Capturing CUDA graph shapes: 100%"
+if ENV != 'ec2':
+    SERVER_READY_PATTERN = r"Capturing CUDA graph shapes: 100%"
+else:
+    SERVER_READY_PATTERN = r"Capturing CUDA graphs: 100%"
 CUDA_OOM_PATTERN = r"CUDA out of memory"
 ERROR_PATTERN = r"Traceback (most recent call last):"
 RAISE_PATTERN = r"raise"

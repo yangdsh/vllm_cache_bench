@@ -9,61 +9,6 @@ import argparse
 from utils import kill_server
 from constants import *
 
-
-def build_server_cmd(config):
-    """Construct the server command string from config."""
-    eviction_algorithm_config_str = json.dumps(config.get('eviction_algorithm_config', {}))
-    args = (
-        f'--port {config["port"]} '
-        f'--eviction_algorithm {config["eviction_algorithm"]} '
-        f'--max-num-batched-tokens 2048 '
-        f'--num-gpu-blocks-override {config["size"]} '
-        f"--eviction_algorithm_config '{eviction_algorithm_config_str}'"
-    )
-    config['args'] = args
-    return VLLM_SERVER_CMD_TEMPLATE.format(args=args)
-
-
-def build_client_cmd(config):
-    """Construct the client command string from config using a dictionary."""
-    all_args = {
-        # Fixed arguments from constants
-        'result-dir': DIR,
-        'model': MODEL,
-        'endpoint': '/v1/chat/completions',
-        
-        # Arguments from the config dictionary
-        'dataset-path': config['dataset_file'],
-        'dataset-name': 'conversation',
-        'host': config['host'],
-        'port': config['port'],
-        'result-filename': config['result_filename'],
-        'num-prompts': config['num_prompts'],
-        'request-rate': config['request_rate'],
-        'session-rate': config['session_rate'],
-        'checkpoint': config['checkpoint'],
-        'use-oracle': config['use_oracle'],
-        'use-token-id': config['use_token_id'],
-        'use-lru': config['use_lru'],
-        'max-active-conversations': config['max_active_conversations'],
-        'time-limit': config['time_limit'],
-
-        # Flags that don't take values
-        'save-result': None,
-    }
-
-    # Build client args using loop
-    client_args_list = []
-    for arg_name, arg_value in all_args.items():
-        if arg_value is None:
-            client_args_list.append(f"--{arg_name}")
-        else:
-            client_args_list.append(f"--{arg_name} {arg_value}")
-    
-    args = " ".join(client_args_list)
-    return CLIENT_CMD_TEMPLATE.format(args=args)
-
-
 def prepare_configs(sizes, scales, alg, dataset, tag):
     """Prepare unified experiment configs for each server/client pair."""
     configs = []
@@ -71,9 +16,9 @@ def prepare_configs(sizes, scales, alg, dataset, tag):
     for size in sizes:
         for scale in scales:
             if 'tensor-parallel' not in VLLM_SERVER_CMD_TEMPLATE:
-                cuda_device_id = i if ENV == 'della' else i+1
+                cuda_device_id = i+1 if ENV == 'fat2' else i
             else:
-                cuda_device_id = ','.join(map(str, range(i, i+4))) if ENV == 'della' else '1,2,3,4'
+                cuda_device_id = '1,2,3,4' if ENV == 'fat2' else ','.join(map(str, range(i, i+4)))
             
             # Base config, will be modified below
             current_size = size
@@ -93,7 +38,7 @@ def prepare_configs(sizes, scales, alg, dataset, tag):
                 'use_oracle': 0,
                 'use_token_id': 1,
                 'max_active_conversations': 200,
-                'time_limit': 2400,
+                'time_limit': 30,
                 'dataset_name': dataset,
                 'tag': tag,
                 'request_rate': 1.0 # Default request rate
@@ -144,6 +89,69 @@ def prepare_configs(sizes, scales, alg, dataset, tag):
             configs.append(base)
             i += 1
     return configs
+
+
+def build_server_cmd(config):
+    """Construct the server command string from config."""
+    if ENV == 'ec2':
+        kv_config = {"kv_connector": "LMCacheConnectorV1", "kv_role": "kv_both"}
+        args = (
+            f'--port {config["port"]} '
+            f'--max-num-batched-tokens 2048 '
+            f'--num-gpu-blocks-override {config["size"]} '
+            f'--kv-transfer-config \'{json.dumps(kv_config)}\''
+        )
+    else:
+        eviction_algorithm_config_str = json.dumps(config.get('eviction_algorithm_config', {}))
+        args = (
+            f'--port {config["port"]} '
+            f'--eviction_algorithm {config["eviction_algorithm"]} '
+            f'--max-num-batched-tokens 2048 '
+            f'--num-gpu-blocks-override {config["size"]} '
+            f"--eviction_algorithm_config '{eviction_algorithm_config_str}'"
+        )
+    config['args'] = args
+    return VLLM_SERVER_CMD_TEMPLATE.format(args=args)
+
+
+def build_client_cmd(config):
+    """Construct the client command string from config using a dictionary."""
+    all_args = {
+        # Fixed arguments from constants
+        'result-dir': DIR,
+        'model': MODEL,
+        'endpoint': '/v1/chat/completions',
+        
+        # Arguments from the config dictionary
+        'dataset-path': config['dataset_file'],
+        'dataset-name': 'conversation',
+        'host': config['host'],
+        'port': config['port'],
+        'result-filename': config['result_filename'],
+        'num-prompts': config['num_prompts'],
+        'request-rate': config['request_rate'],
+        'session-rate': config['session_rate'],
+        'checkpoint': config['checkpoint'],
+        'use-oracle': config['use_oracle'],
+        'use-token-id': config['use_token_id'],
+        'use-lru': config['use_lru'],
+        'max-active-conversations': config['max_active_conversations'],
+        'time-limit': config['time_limit'],
+
+        # Flags that don't take values
+        'save-result': None,
+    }
+
+    # Build client args using loop
+    client_args_list = []
+    for arg_name, arg_value in all_args.items():
+        if arg_value is None:
+            client_args_list.append(f"--{arg_name}")
+        else:
+            client_args_list.append(f"--{arg_name} {arg_value}")
+    
+    args = " ".join(client_args_list)
+    return CLIENT_CMD_TEMPLATE.format(args=args)
 
 
 def launch_server(config, tag):
@@ -225,6 +233,8 @@ def parse_metrics_from_log(log_path):
     """Parse metrics from the completed client log file."""
     metrics = {}
     hit_ratios = []
+    hit_tokens = []
+    need_convert = 0
     prompt_tokens = []
     
     if not os.path.exists(log_path):
@@ -234,9 +244,14 @@ def parse_metrics_from_log(log_path):
         log_content = fp.read()
         for line in log_content.split('\n'):
             if 'gpu_prefix_cache_hit_rate' in line:
+                need_convert = 1
                 hit_ratios.append(line.split()[-1])
             if 'vllm:prompt_tokens_total' in line:
                 prompt_tokens.append(line.split()[-1])
+            if 'Prefix cache queries:' in line:
+                prompt_tokens.append(line.replace('%', '').split()[-1])
+            if 'Prefix cache hits:' in line:
+                hit_tokens.append(line.replace('%', '').split()[-1])
             if 'Mean TTFT (ms):' in line:
                 metrics['mean_ttft'] = line.split()[-1]
             if 'Median TTFT (ms):' in line:
@@ -250,8 +265,27 @@ def parse_metrics_from_log(log_path):
             if 'Successful requests:' in line:
                 metrics['num_requests'] = line.split()[-1]
 
-    metrics['hit_ratios'] = hit_ratios
-    metrics['prompt_tokens'] = prompt_tokens
+    if need_convert:
+        metrics['hit_ratios'] = []
+        metrics['prompt_tokens'] = []
+        i = 0
+        for h, p in zip(hit_ratios, prompt_tokens):
+            hit_tokens.append(int(h) * int(p))
+            if i > 0:
+                metrics['prompt_tokens'].append(int(p) - int(prompt_tokens[i-1]))
+                metrics['hit_ratios'].append(
+                    (hit_tokens[i] - hit_tokens[i-1]) / metrics['prompt_tokens'][-1])
+            i += 1
+    else:
+        metrics['hit_ratios'] = []
+        metrics['prompt_tokens'] = []
+        i = 0
+        for h, p in zip(hit_tokens, prompt_tokens):
+            if i > 0:
+                metrics['prompt_tokens'].append(int(p) - int(prompt_tokens[i-1]))
+                metrics['hit_ratios'].append(
+                    (int(h) - int(hit_tokens[i-1])) / metrics['prompt_tokens'][-1])
+            i += 1
     
     return metrics
 
@@ -317,16 +351,16 @@ async def main(sizes, scales, alg, dataset, tag):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--exp", type=str, default="size-8b", 
+    parser.add_argument("--exp", type=str, default="lmcache", 
                         help="The experiment to run.")
     args = parser.parse_args()
 
-    if args.exp == "fat2_online":
-        for alg in ['ml', 'lru', 'ml-online']:
-            for dataset in ['lmsys']:
-                for sizes in [[4000, 7000, 10000, 13000, 16000]]:
+    if args.exp == "lmcache":
+        for alg in ['lru']:
+            for dataset in ['sharegpt', 'lmsys']:
+                for sizes in [[4000]]:
                     for scales in [[1]]:
-                        asyncio.run(main(sizes, scales, alg, dataset, 'size-online'))
+                        asyncio.run(main(sizes, scales, alg, dataset, 'size-lmcache'))
     elif args.exp == "size-8b":
         for alg in ['ml-online-finetune', 'ml', 'lru', 'ml-online']:
             for dataset in ['lmsys', 'chatbot', 'sharegpt']:

@@ -33,13 +33,22 @@ eac = {"enable_online_learning": 1,
 # "model_path": f'{HOME}/vllm/benchmarks/checkpoints_lmsys-chat-1m_20/lmsys-chat-1m_epoch11_metric_0_5797.pt'
 }
 eviction_algorithm_config_str = json.dumps(eac)
-server_args = (
-    f'--port {server_config["port"]} '
-    f'--eviction_algorithm {server_config["eviction_algorithm"]} '
-    f'--max-num-batched-tokens 2048 '
-    f'--num-gpu-blocks-override {server_config["size"]} '
-    f"--eviction_algorithm_config '{eviction_algorithm_config_str}'"
-)
+if ENV == 'ec2':
+    kv_config = {"kv_connector": "LMCacheConnectorV1", "kv_role": "kv_both"}
+    server_args = (
+        f'--port {server_config["port"]} '
+        f'--max-num-batched-tokens 2048 '
+        f'--num-gpu-blocks-override {server_config["size"]} '
+        f'--kv-transfer-config \'{json.dumps(kv_config)}\''
+    )
+else:
+    server_args = (
+        f'--port {server_config["port"]} '
+        f'--eviction_algorithm {server_config["eviction_algorithm"]} '
+        f'--max-num-batched-tokens 2048 '
+        f'--num-gpu-blocks-override {server_config["size"]} '
+        f"--eviction_algorithm_config '{eviction_algorithm_config_str}'"
+    )
 server_cmd = VLLM_SERVER_CMD_TEMPLATE.format(args=server_args)
 ssh_command = f"{SERVER_COMMAND_PREFIX} {server_config['cuda_devices']} {server_cmd} {SERVER_COMMAND_SUFFIX}"
 
@@ -91,7 +100,7 @@ if __name__ == "__main__":
     server_log = open("server.log", "w")
 
     print(ssh_command)
-    print(server_log)
+    print("server.log")
     server_proc = subprocess.Popen(ssh_command, shell=True, stdout=server_log, stderr=server_log)
 
     # --- Wait for server to be ready ---
