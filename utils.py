@@ -91,13 +91,15 @@ def kill_server(host):
             "fi; "
             "fi"
         )
-        host = ""
-        if host:
-            subprocess.run(["ssh", host, kill_cmd], check=True)
-            print(f"Killed any processes using GPUs on {host}.")
-        else:
-            subprocess.run(kill_cmd, shell=True, check=True)
-            print("Killed any processes using GPUs on the local machine.")
+        subprocess.run(kill_cmd, shell=True, check=True)
+        print("Killed any processes using GPUs on the local machine.")
+
+        # Kill any vllm processes for the current user
+        user = os.environ.get('USER')
+        if user:
+            pkill_cmd = f"pkill -u {user} -f vllm"
+            subprocess.run(pkill_cmd, shell=True, check=True)
+            print(f"Killed vllm processes for user {user}")
     except subprocess.CalledProcessError as e:
         print(f"No processes to kill or an error occurred: {e}")
 

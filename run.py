@@ -38,7 +38,7 @@ def prepare_configs(sizes, scales, alg, dataset, tag):
                 'use_oracle': 0,
                 'use_token_id': 1,
                 'max_active_conversations': 200,
-                'time_limit': 30,
+                'time_limit': 1200,
                 'dataset_name': dataset,
                 'tag': tag,
                 'request_rate': 1.0 # Default request rate
@@ -81,9 +81,9 @@ def prepare_configs(sizes, scales, alg, dataset, tag):
             # Eviction algorithm config
             if 'online' in base['eviction_algorithm']:
                 if 'finetune' in base['algorithm']:
-                    base['eviction_algorithm_config'] = {"enable_online_learning": 1, "learning_rate": 1e-3, "model_path": base['checkpoint']}
+                    base['eviction_algorithm_config'] = {"enable_online_learning": 1, "learning_rate": 1e-3, "min_batch_size": 64, "model_path": base['checkpoint']}
                 else:
-                    base['eviction_algorithm_config'] = {"enable_online_learning": 1, "learning_rate": 1e-3, "min_batch_size": 32}
+                    base['eviction_algorithm_config'] = {"enable_online_learning": 1, "learning_rate": 1e-3, "min_batch_size": 64}
             else:
                 base['eviction_algorithm_config'] = {"enable_online_learning": 0, "model_path": base['checkpoint']}
             configs.append(base)
@@ -196,6 +196,7 @@ def launch_client(config, tag):
     stderr_log_name = f"{base_log_name}.err.log"
 
     print("Running client command, logging to:", stdout_log_name, flush=True)
+    print(client_cmd)
 
     with open(stdout_log_name, "w") as stdout_file, open(stderr_log_name, "w") as stderr_file:
         popen_kwargs = {"shell": True, "stdout": stdout_file, "stderr": stderr_file}
@@ -270,11 +271,15 @@ def parse_metrics_from_log(log_path):
         metrics['prompt_tokens'] = []
         i = 0
         for h, p in zip(hit_ratios, prompt_tokens):
-            hit_tokens.append(int(h) * int(p))
+            hit_tokens.append(float(h) * float(p))
             if i > 0:
-                metrics['prompt_tokens'].append(int(p) - int(prompt_tokens[i-1]))
-                metrics['hit_ratios'].append(
-                    (hit_tokens[i] - hit_tokens[i-1]) / metrics['prompt_tokens'][-1])
+                delta_prompt_tokens = float(p) - float(prompt_tokens[i-1])
+                metrics['prompt_tokens'].append(delta_prompt_tokens)
+                if delta_prompt_tokens == 0:
+                    metrics['hit_ratios'].append(0.0)
+                else:
+                    metrics['hit_ratios'].append(
+                        (hit_tokens[i] - hit_tokens[i-1]) / delta_prompt_tokens)
             i += 1
     else:
         metrics['hit_ratios'] = []
@@ -282,9 +287,13 @@ def parse_metrics_from_log(log_path):
         i = 0
         for h, p in zip(hit_tokens, prompt_tokens):
             if i > 0:
-                metrics['prompt_tokens'].append(int(p) - int(prompt_tokens[i-1]))
-                metrics['hit_ratios'].append(
-                    (int(h) - int(hit_tokens[i-1])) / metrics['prompt_tokens'][-1])
+                delta_prompt_tokens = float(p) - float(prompt_tokens[i-1])
+                metrics['prompt_tokens'].append(delta_prompt_tokens)
+                if delta_prompt_tokens == 0:
+                    metrics['hit_ratios'].append(0.0)
+                else:
+                    metrics['hit_ratios'].append(
+                        (float(h) - float(hit_tokens[i-1])) / delta_prompt_tokens)
             i += 1
     
     return metrics
@@ -364,7 +373,7 @@ if __name__ == "__main__":
     elif args.exp == "size-8b":
         for alg in ['ml-online-finetune', 'ml', 'lru', 'ml-online']:
             for dataset in ['lmsys', 'chatbot', 'sharegpt']:
-                for sizes in [[5000, 10000, 15000, 20000]]:
+                for sizes in [[4000, 6000, 8000, 10000]]:
                     for scales in [[1]]:
                         asyncio.run(main(sizes, scales, alg, dataset, 'size-8b'))
     elif args.exp == "della_reqrate":
