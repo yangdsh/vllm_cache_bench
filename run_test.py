@@ -73,7 +73,7 @@ all_args = {
     'max-active-conversations': 200,
     'checkpoint': f'{HOME}/vllm/benchmarks/checkpoints_lmsys-chat-1m_20/lmsys-chat-1m_epoch11_metric_0_5797.pt',
     'dataset-path': '"lmsys/lmsys-chat-1m"',
-    'time-limit': 1200,
+    'time-limit': 60,
 
     # Flags that don't take values
     'save-result': None,

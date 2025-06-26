@@ -16,7 +16,7 @@ module purge
 module load anaconda3/2024.6
 conda activate vllm-cuda121
 cd /home/dy5/vllm_cache_bench
-python3 run.py
+python3 run.py --exp size-8b
 
 #sbatch slurm.sh
 #conda env create -f environment.yml
