@@ -41,7 +41,7 @@ def prepare_configs(sizes, scales, alg, dataset, tag):
                 'time_limit': 1200,
                 'dataset_name': dataset,
                 'tag': tag,
-                'request_rate': 1.0 # Default request rate
+                'request_rate': 1.0, # Default request rate
             }
             # Dataset-specific overrides
             if dataset.startswith('tay'):
@@ -98,7 +98,6 @@ def build_server_cmd(config):
         args = (
             f'--port {config["port"]} '
             f'--max-num-batched-tokens 2048 '
-            f'--num-gpu-blocks-override {config["size"]} '
             f'--kv-transfer-config \'{json.dumps(kv_config)}\''
         )
     else:
@@ -159,7 +158,10 @@ def launch_server(config, tag):
     os.makedirs(f'{DIR}/{config["dataset_name"]}-{tag}/client_logs', exist_ok=True)
     log_file_name = f"{DIR}/{config['dataset_name']}-{tag}/server_{config['port']}_{config['algorithm']}.log"
     server_cmd = build_server_cmd(config)
-    ssh_command = f"{SERVER_COMMAND_PREFIX} {config['cuda_devices']} {server_cmd} {SERVER_COMMAND_SUFFIX}"
+    server_command_prefix = SERVER_COMMAND_PREFIX
+    if ENV == 'ec2':
+        server_command_prefix += f"LMCACHE_MAX_LOCAL_CPU_SIZE={config['size']} "
+    ssh_command = f"{server_command_prefix} {config['cuda_devices']} {server_cmd} {SERVER_COMMAND_SUFFIX}"
     print('\n', ssh_command, '\n')
     with open(log_file_name, "w") as log_file:
         popen_kwargs = {"shell": True, "stdout": log_file, "stderr": log_file}
@@ -259,6 +261,12 @@ def parse_metrics_from_log(log_path):
                 metrics['median_ttft'] = line.split()[-1]
             if 'P99 TTFT (ms):' in line:
                 metrics['p99_ttft'] = line.split()[-1]
+            if 'Mean ITL (ms):' in line:
+                metrics['mean_itl'] = line.split()[-1]
+            if 'Median ITL (ms):' in line:
+                metrics['median_itl'] = line.split()[-1]
+            if 'P99 ITL (ms):' in line:
+                metrics['p99_itl'] = line.split()[-1]
             if 'Total input tokens:' in line:
                 metrics['input_tokens'] = line.split()[-1]
             if 'Total generated tokens:' in line:
@@ -367,7 +375,7 @@ if __name__ == "__main__":
     if args.exp == "lmcache":
         for alg in ['lru']:
             for dataset in ['sharegpt', 'lmsys']:
-                for sizes in [[4000]]:
+                for sizes in [[256]]:
                     for scales in [[1]]:
                         asyncio.run(main(sizes, scales, alg, dataset, 'size-lmcache'))
     elif args.exp == "size-8b":

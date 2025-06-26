@@ -38,7 +38,6 @@ ENV_CONFIGS = {
         'SERVER_COMMAND_PREFIX': (
             "LMCACHE_CHUNK_SIZE=256 "
             "LMCACHE_LOCAL_CPU=True "
-            "LMCACHE_MAX_LOCAL_CPU_SIZE=80.0 "
         ),
         'HOME': '/home/ubuntu',
         'DATA_HOME': '/home/ubuntu/vllm_cache_bench',
