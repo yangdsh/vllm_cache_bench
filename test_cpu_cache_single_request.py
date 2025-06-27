@@ -38,10 +38,9 @@ if ENV == 'ec2':
     server_args = (
         f'--port {server_config["port"]} '
         f'--max-num-batched-tokens 2048 '
-        # f'--num-gpu-blocks-override {server_config["size"]} '
+        f'--num-gpu-blocks-override {server_config["size"]} '
         f'--kv-transfer-config \'{json.dumps(kv_config)}\''
     )
-    SERVER_COMMAND_PREFIX += f"LMCACHE_MAX_LOCAL_CPU_SIZE={80} "
 else:
     server_args = (
         f'--port {server_config["port"]} '
@@ -73,9 +72,9 @@ all_args = {
     'session-rate': 10,
     'max-active-conversations': 200,
     'checkpoint': f'{HOME}/vllm/benchmarks/checkpoints_lmsys-chat-1m_20/lmsys-chat-1m_epoch11_metric_0_5797.pt',
-    'dataset-path': '"lmsys/lmsys-chat-1m"',
-    # 'dataset-path': 'test_data.json',
-    'time-limit': 300, # TODO: need a long input file
+    # 'dataset-path': '"lmsys/lmsys-chat-1m"',
+    'dataset-path': 'test_data.json',
+    'time-limit': 60,
 
     # Flags that don't take values
     'save-result': None,
@@ -123,4 +122,7 @@ if __name__ == "__main__":
     client_log = None
     print(client_cmd)
     subprocess.run(client_cmd, shell=True, stdout=client_log, stderr=client_log)
-    time.sleep(3600 * 24)
+    subprocess.run(client_cmd, shell=True, stdout=client_log, stderr=client_log)
+    # expected output: Mean TTFT (ms): is less than 50
+
+    # time.sleep(3600 * 24)

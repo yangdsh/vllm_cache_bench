@@ -77,13 +77,13 @@ if ENV == 'fat2':
 
 # Refactored CLIENT_CMD_TEMPLATE to use named placeholders for clarity
 CLIENT_CMD_TEMPLATE = (
-    "PYTHONUNBUFFERED=1 python ~/vllm/benchmarks/benchmark_serving.py {args} "
+    "PYTHONUNBUFFERED=1 python ../LMCache/benchmarks/multi-round-open-loop/benchmark_serving.py {args} "
 )
 
 if ENV != 'ec2':
     SERVER_READY_PATTERN = r"Capturing CUDA graph shapes: 100%"
 else:
-    SERVER_READY_PATTERN = r"Capturing CUDA graphs: 100%"
+    SERVER_READY_PATTERN = r"Starting vLLM API server"
 CUDA_OOM_PATTERN = r"CUDA out of memory"
 ERROR_PATTERN = r"Traceback (most recent call last):"
 RAISE_PATTERN = r"raise"
