@@ -101,6 +101,8 @@ def build_server_cmd(config):
             f'--num-gpu-blocks-override 4000 '
             f'--kv-transfer-config \'{json.dumps(kv_config)}\''
         )
+        server_command_prefix = SERVER_COMMAND_PREFIX
+        server_command_prefix += f"LMCACHE_MAX_LOCAL_CPU_SIZE={config['size']} "
     else:
         eviction_algorithm_config_str = json.dumps(config.get('eviction_algorithm_config', {}))
         args = (
@@ -111,7 +113,7 @@ def build_server_cmd(config):
             f"--eviction_algorithm_config '{eviction_algorithm_config_str}'"
         )
     config['args'] = args
-    return VLLM_SERVER_CMD_TEMPLATE.format(args=args)
+    return VLLM_SERVER_CMD_TEMPLATE.format(args=args), server_command_prefix
 
 
 def build_client_cmd(config):
@@ -158,10 +160,7 @@ def launch_server(config, tag):
     os.makedirs(f'{DIR}/{config["dataset_name"]}-{tag}', exist_ok=True)
     os.makedirs(f'{DIR}/{config["dataset_name"]}-{tag}/client_logs', exist_ok=True)
     log_file_name = f"{DIR}/{config['dataset_name']}-{tag}/server_{config['port']}_{config['algorithm']}.log"
-    server_cmd = build_server_cmd(config)
-    server_command_prefix = SERVER_COMMAND_PREFIX
-    if ENV == 'ec2':
-        server_command_prefix += f"LMCACHE_MAX_LOCAL_CPU_SIZE={config['size']} "
+    server_cmd, server_command_prefix = build_server_cmd(config)
     ssh_command = f"{server_command_prefix} {config['cuda_devices']} {server_cmd} {SERVER_COMMAND_SUFFIX}"
     print('\n', ssh_command, '\n')
     with open(log_file_name, "w") as log_file:

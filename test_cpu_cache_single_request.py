@@ -41,6 +41,7 @@ if ENV == 'ec2':
         f'--num-gpu-blocks-override {server_config["size"]} '
         f'--kv-transfer-config \'{json.dumps(kv_config)}\''
     )
+    SERVER_COMMAND_PREFIX += f"LMCACHE_MAX_LOCAL_CPU_SIZE={80} "
 else:
     server_args = (
         f'--port {server_config["port"]} '
