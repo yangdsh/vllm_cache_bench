@@ -98,6 +98,7 @@ def build_server_cmd(config):
         args = (
             f'--port {config["port"]} '
             f'--max-num-batched-tokens 2048 '
+            f'--num-gpu-blocks-override 4000 '
             f'--kv-transfer-config \'{json.dumps(kv_config)}\''
         )
     else:

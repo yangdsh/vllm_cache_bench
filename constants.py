@@ -42,7 +42,7 @@ ENV_CONFIGS = {
         'HOME': '/home/ubuntu',
         'DATA_HOME': '/home/ubuntu/vllm_cache_bench',
         'SERVER_COMMAND_SUFFIX': "",
-        'MODEL': "/home/ubuntu/.cache/huggingface/hub/models--Qwen--Qwen3-8B-FP8/snapshots/2df580c02b34307b00ccd91309e67ec5a89987a9"
+        'MODEL': "Qwen/Qwen3-8B-FP8"
     }
 }
 
@@ -87,10 +87,3 @@ else:
 CUDA_OOM_PATTERN = r"CUDA out of memory"
 ERROR_PATTERN = r"Traceback (most recent call last):"
 RAISE_PATTERN = r"raise"
-
-
-'''
-CUDA_VISIBLE_DEVICES=0 VLLM_SERVER_DEV_MODE=1 VLLM_LOGGING_LEVEL=INFO vllm serve Qwen/Qwen2.5-0.5B-Instruct --dtype=half --disable-log-requests --max_num_seqs 512 --num-scheduler-steps 1 --max-model-len 16384 --disable_custom_all_reduce --enable-chunked-prefill --enable-prefix-caching --gpu_memory_utilization 0.6  --pipeline-parallel-size 1 --port 8004  --eviction-algorithm ml --block-size 16
-python ~/vllm/benchmarks/benchmark_serving.py --result-dir results/Qwen2.5-0.5B-Instruct --save-result --model Qwen/Qwen2.5-0.5B-Instruct --endpoint /v1/chat/completions --dataset-path lmsys/lmsys-chat-1m --dataset-name conversation  --host localhost --port 8004 --result-filename test.json --num-prompts 1000 --request-rate 0.01 --session-rate 4 --checkpoint /data/dongshengy/vllm/benchmarks/lmsys-chat-1m2.pt --use-token-id 1 --use-oracle 0 --use-lru 0
-python ~/vllm/benchmarks/benchmark_serving.py --result-dir results/Qwen2.5-0.5B-Instruct --save-result --model Qwen/Qwen2.5-0.5B-Instruct --endpoint /v1/chat/completions --dataset-path ~/Scientific_Dialog-ShareGPT.json --dataset-name conversation  --host localhost --port 8004 --result-filename test.json --num-prompts 1000 --request-rate 0.1 --session-rate 4 --checkpoint /data/dongshengy/vllm/benchmarks/Tay5.pt --use-oracle 1 --use_token_id 1
-python ~/vllm/benchmarks/benchmark_serving.py --result-dir results/Qwen2.5-0.5B-Instruct --save-result --model Qwen/Qwen2.5-0.5B-Instruct --endpoint /v1/chat/completions --dataset-path "lmsys/lmsys-chat-1m" --dataset-name conversation  --host localhost --port 8004 --result-filename 1746419748.json --num-prompts 3000 --request-rate 0.03 --session-rate 20 --checkpoint /data/dongshengy/vllm/benchmarks/checkpoints_lmsys-chat-1m/lmsys-chat-1m_epoch4_metric_0_6818.pt --use-oracle 0 --use-token-id 1 --use-lru 1 --max-active-conversations 100'''
