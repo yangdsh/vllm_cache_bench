@@ -69,6 +69,13 @@ def prepare_configs(sizes, scales, alg, dataset, tag):
                     'dataset_file': f'{DATA_HOME}/ShareGPT_V3_unfiltered_cleaned_split.json',
                     'request_rate': 0.01,
                 })
+            elif dataset.startswith('csv_morning'):
+                base.update({
+                    'checkpoint': f'',
+                    'dataset_file': f'',
+                    'dataset_format': 'conversational_csv',
+                    'request_rate': 1,
+                })
             
             # Apply request rate scaling
             base['request_rate'] *= base['scale']
@@ -126,7 +133,7 @@ def build_client_cmd(config):
         
         # Arguments from the config dictionary
         'dataset-path': config['dataset_file'],
-        'dataset-name': 'conversation',
+        'dataset-name': config.get('dataset_format', 'conversation'),
         'host': config['host'],
         'port': config['port'],
         'result-filename': config['result_filename'],

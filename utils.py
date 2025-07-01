@@ -85,6 +85,10 @@ def kill_server(host):
             pkill_cmd = f"pkill -u {user} -f vllm"
             subprocess.run(pkill_cmd, shell=True, check=True)
             print(f"Killed vllm processes for user {user}")
+    except subprocess.CalledProcessError as e:
+        print(f"Skipping killing vllm processes for user {user}: {e}")
+    
+    try:
         # Command to find and kill all processes running on NVIDIA GPUs.
         # It first checks if nvidia-smi command exists.
         # Then, it gets the PIDs of GPU processes.
@@ -99,8 +103,8 @@ def kill_server(host):
         )
         subprocess.run(kill_cmd, shell=True, check=True)
         print("Killed any processes using GPUs on the local machine.")
+        print("Waiting for 10 seconds to ensure all processes are killed...")
+        time.sleep(10)
     except subprocess.CalledProcessError as e:
         print(f"No processes to kill or an error occurred: {e}")
         return
-    print("Waiting for 30 seconds to ensure all processes are killed...")
-    time.sleep(30)
