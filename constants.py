@@ -42,7 +42,7 @@ ENV_CONFIGS = {
         'HOME': '/home/ubuntu',
         'DATA_HOME': '/home/ubuntu/vllm_cache_bench',
         'SERVER_COMMAND_SUFFIX': "",
-        'MODEL': "Qwen/Qwen3-8B-FP8"
+        'MODEL': "meta-llama/Meta-Llama-3.1-8B-Instruct" # "Qwen/Qwen3-8B-FP8"
     }
 }
 

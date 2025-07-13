@@ -10,6 +10,8 @@ import time
 import json
 import argparse
 import asyncio
+from dataclasses import dataclass
+from typing import Optional, Dict, Any
 from utils import kill_server
 
 # Import environment configuration from constants.py
@@ -26,22 +28,109 @@ from constants import (
     CLIENT_CMD_TEMPLATE
 )
 
-async def run_experiment(memory_utilization, log_suffix="", gpu_device=0):
-    """Run a single experiment with specified GPU memory utilization"""
+@dataclass(frozen=True)
+class ExperimentConfig:
+    """Structured configuration for a single experiment"""
+    memory_utilization: float
+    request_rate: float
+    dataset_name: str = "conversational_csv"
+    dataset_path: str = f'set by argument'
+    num_prompts: int = 30000
+    time_limit: int = 1200
+    gpu_device: int = 0
+    server_port: Optional[int] = None
+    log_prefix: Optional[str] = None
+    log_suffix: Optional[str] = None
+    use_conversation_eviction: bool = False
+    
+    def __post_init__(self):
+        if self.server_port is None:
+            object.__setattr__(self, 'server_port', 8000 + int(self.memory_utilization * 10) % 100)
+        if self.log_suffix is None:
+            conv_eviction_suffix = "_conv_evict" if self.use_conversation_eviction else ""
+            object.__setattr__(self, 'log_suffix', f"_{self.memory_utilization}_{self.request_rate}"
+                               f"_{conv_eviction_suffix}")
+        if self.log_prefix is None:
+            object.__setattr__(self, 'log_prefix', "logs")
+    def get_client_args(self) -> Dict[str, Any]:
+        """Get client arguments as a dictionary"""
+        return {
+            'result-dir': self.log_prefix,
+            'model': MODEL,
+            'endpoint': '/v1/chat/completions',
+            'dataset-name': self.dataset_name,
+            'host': 'localhost',
+            'port': self.server_port,
+            'result-filename': f'{self.log_prefix}/client{self.log_suffix}.log',
+            'num-prompts': self.num_prompts,
+            'use-oracle': 0,
+            'request-rate': self.request_rate,  
+            'session-rate': -1, 
+            'max-active-conversations': -1,
+            'checkpoint': 'None',
+            'dataset-path': self.dataset_path,
+            'time-limit': self.time_limit,
+            'save-result': None,
+        }
+    
+    def get_server_config(self) -> Dict[str, Any]:
+        """Get server configuration as a dictionary"""
+        return {
+            'host': 'localhost',
+            'cuda_devices': f'CUDA_VISIBLE_DEVICES={self.gpu_device}',
+            'eviction_algorithm': 'ml',
+            'port': self.server_port,
+            'size': 4000,
+            'scale': 1,
+        }
+    
+    def get_key(self) -> str:
+        """Get a string key for this configuration"""
+        conv_eviction_suffix = "_conv_evict" if self.use_conversation_eviction else ""
+        return f"{self.memory_utilization}_{self.request_rate}_{self.dataset_name}{conv_eviction_suffix}"
+
+def create_experiment_configs(
+    memory_utilizations: list[float],
+    request_rates: list[float],
+    dataset_paths: list[str],
+    use_conversation_evictions: list[bool] = [True]
+) -> list[ExperimentConfig]:
+    """
+    Create a list of experiment configurations from parameter lists.
+    
+    Args:
+        memory_utilizations: List of GPU memory utilization values
+        request_rates: List of request rate values  
+        dataset_paths: List of dataset file paths
+        use_conversation_evictions: Whether to enable conversation-aware eviction
+    
+    Returns:
+        List of ExperimentConfig objects
+    """
+    configs = []
+    for memory_util in memory_utilizations:
+        for request_rate in request_rates:
+            for use_conversation_eviction in use_conversation_evictions:
+                for dataset_path in dataset_paths:
+                    config = ExperimentConfig(
+                        memory_utilization=memory_util,
+                        request_rate=request_rate,
+                        dataset_path=dataset_path,
+                        use_conversation_eviction=use_conversation_eviction
+                    )
+                    configs.append(config)
+    
+    return configs
+
+async def run_experiment(config: ExperimentConfig):
+    """Run a single experiment with the given configuration"""
+    config_id = config.get_key()
     print(f"\n{'='*50}")
-    print(f"RUNNING EXPERIMENT WITH GPU_MEMORY_UTILIZATION={memory_utilization} ON GPU {gpu_device}")
+    print(f"RUNNING EXPERIMENT: {config_id}")
     print(f"{'='*50}")
 
     # --- Server config ---
-    server_port = 8000 + int(memory_utilization * 10) % 100  # Unique port for each experiment
-    server_config = {
-        'host': 'localhost',
-        'cuda_devices': f'CUDA_VISIBLE_DEVICES={gpu_device}',
-        'eviction_algorithm': 'ml',
-        'port': server_port,
-        'size': 4000,
-        'scale': 1,
-    }
+    server_config = config.get_server_config()
     eac = {"enable_online_learning": 1}
     eviction_algorithm_config_str = json.dumps(eac)
     
@@ -50,45 +139,34 @@ async def run_experiment(memory_utilization, log_suffix="", gpu_device=0):
         server_args = (
             f'--port {server_config["port"]} '
             f'--max-num-batched-tokens 16384 '
-            f'--gpu-memory-utilization {0.6} '
+            f'--gpu-memory-utilization {0.95} '
             f'--kv-transfer-config \'{json.dumps(kv_config)}\''
         )
-        server_prefix = SERVER_COMMAND_PREFIX + f"LMCACHE_MAX_LOCAL_CPU_SIZE={32 * memory_utilization} "
+        server_prefix = SERVER_COMMAND_PREFIX + f"LMCACHE_MAX_LOCAL_CPU_SIZE={config.memory_utilization} "
+        if config.use_conversation_eviction:
+            # Enable conversation-aware eviction through LMCache extra_config
+            # This sets the use_conversation_eviction flag in the LMCache configuration
+            extra_config = {"use_conversation_eviction": True}
+            server_prefix += f"LMCACHE_EXTRA_CONFIG='{json.dumps(extra_config)}' "
     else:
         server_args = (
             f'--port {server_config["port"]} '
             f'--eviction_algorithm {server_config["eviction_algorithm"]} '
             f'--max-num-batched-tokens 2048 '
-            f'--gpu-memory-utilization {memory_utilization} '
+            f'--gpu-memory-utilization {config.memory_utilization} '
             f'--num-gpu-blocks-override {server_config["size"]} '
             f"--eviction_algorithm_config '{eviction_algorithm_config_str}'"
         )
         server_prefix = SERVER_COMMAND_PREFIX
+        if config.use_conversation_eviction:
+            extra_config = {"use_conversation_eviction": True}
+            server_prefix += f"LMCACHE_EXTRA_CONFIG='{json.dumps(extra_config)}' "
     
     server_cmd = VLLM_SERVER_CMD_TEMPLATE.format(args=server_args)
     ssh_command = f"{server_prefix} {server_config['cuda_devices']} {server_cmd} {SERVER_COMMAND_SUFFIX}"
 
-    # --- Client args config (matching run_test.py exactly) ---
-    all_args = {
-        'result-dir': DIR,
-        'model': MODEL,
-        'endpoint': '/v1/chat/completions',
-        'dataset-name': 'conversational_csv',
-        'host': server_config['host'],
-        'port': server_config['port'],
-        'result-filename': f'client{log_suffix}.log',
-        'use-lru': 0,
-        'num-prompts': 30000,
-        'use-oracle': 0,
-        'use-token-id': 1,
-        'request-rate': 1,  
-        'session-rate': 10, 
-        'max-active-conversations': 200,
-        'checkpoint': 'None',
-        'dataset-path': f'{HOME}/PrefixCacheInternProject/Qdata/cw_logs_5_29_5am_6am.csv',
-        'time-limit': 600,
-        'save-result': None,
-    }
+    # --- Client args config ---
+    all_args = config.get_client_args()
 
     # Build client args using loop
     client_args_list = []
@@ -103,12 +181,12 @@ async def run_experiment(memory_utilization, log_suffix="", gpu_device=0):
     client_cmd = f"{server_config['cuda_devices']} {client_cmd}"
 
     # --- Start server ---
-    server_log_file = f"server{log_suffix}.log"
+    server_log_file = f"{config.log_prefix}/server{config.log_suffix}.log"
     server_log = open(server_log_file, "w")
 
-    print(f"Starting server for memory_util={memory_utilization} on port {server_port}")
+    print(f"Starting server for config {config_id} on port {config.server_port}")
     print(f"Server logs: {server_log_file}")
-    print(ssh_command)
+    # print(ssh_command)
     server_proc = await asyncio.create_subprocess_shell(
         ssh_command, 
         stdout=server_log, 
@@ -122,19 +200,21 @@ async def run_experiment(memory_utilization, log_suffix="", gpu_device=0):
             with open(server_log_file) as f:
                 if re.search(SERVER_READY_PATTERN, f.read()):
                     ready = True
-                    print(f"Server ready for memory_util={memory_utilization} after {i} seconds")
+                    print(f"Server ready for config {config_id} after {i} seconds\n")
                     break
         await asyncio.sleep(1)
     
     if not ready:
-        print(f"Server for memory_util={memory_utilization} not ready, terminating.")
+        print(f"Server for config {config_id} not ready, terminating.")
         server_proc.terminate()
         await server_proc.wait()
         server_log.close()
         return False
 
     # --- Start client ---
-    print(f"Starting client for memory_util={memory_utilization}")
+    client_log_file = f"{config.log_prefix}/client{config.log_suffix}.log"
+    print(f"Starting client for config {config_id}; log file: {client_log_file}\n")
+    # print(client_cmd)
     client_proc = await asyncio.create_subprocess_shell(
         client_cmd, 
         stdout=asyncio.subprocess.PIPE, 
@@ -142,35 +222,34 @@ async def run_experiment(memory_utilization, log_suffix="", gpu_device=0):
     )
     
     stdout, stderr = await client_proc.communicate()
-    client_log_file = f"client{log_suffix}.log"
     client_log = open(client_log_file, "w")
     client_log.write(stdout.decode())
     client_log.write(stderr.decode())
     client_log.close()
     
     # --- Clean up ---
-    print(f"Cleaning up server for memory_util={memory_utilization}")
+    print(f"Cleaning up server for config {config_id}\n")
     server_proc.terminate()
     await server_proc.wait()
     server_log.close()
     
     success = client_proc.returncode == 0
-    print(f"Experiment memory_util={memory_utilization}: {'SUCCESS' if success else 'FAILED'}")
+    print(f"Experiment {config_id}: {'SUCCESS' if success else 'FAILED'}")
     return success
 
-def analyze_logs(memory_utilizations):
+def analyze_logs(configs: list[ExperimentConfig]):
     """Analyze server and client logs for preemption, cache query patterns, and conversation analytics"""
     print(f"\n{'='*80}")
     print("ANALYZING SERVER AND CLIENT LOGS FOR COMPREHENSIVE ANALYTICS")
     print("="*80)
     
-    for memory_util in memory_utilizations:
-        print(f"\n--- Memory Utilization: {memory_util} ---")
-        log_suffix = f"_{memory_util}"
-        server_log_file = f"server{log_suffix}.log"
-        client_log_file = f"client{log_suffix}.log"
+    for config in configs:
+        config_id = config.get_key()
+        print(f"\n--- Config: {config_id} ---")
+        server_log_file = f"{config.log_prefix}/server{config.log_suffix}.log"
+        client_log_file = f"{config.log_prefix}/client{config.log_suffix}.log"
         
-        # Initialize stats for this memory utilization
+        # Initialize stats for this config
         stats = {
             'cache_stats': {},
             'conversation_features': {}
@@ -241,12 +320,6 @@ def analyze_logs(memory_utilizations):
                     vllm_stats[key] = value
                 elif key.startswith('lmcache_'):
                     lmcache_stats[key] = value
-                else:
-                    # Other stats
-                    if key.endswith('_rate'):
-                        print(f"    {key}: {float(value)*100:.1f}%")
-                    else:
-                        print(f"    {key}: {value}")
             
             if vllm_stats:
                 print(f"    vLLM Local Prefix Cache:")
@@ -256,14 +329,6 @@ def analyze_logs(memory_utilizations):
                         print(f"      {clean_key}: {float(value)*100:.1f}%")
                     else:
                         print(f"      {clean_key}: {value}")
-                
-                # Calculate preemption rate if we have preemption stats
-                vllm_preemptions = int(vllm_stats.get('vllm_preemptions', 0))
-                vllm_reschedules = int(vllm_stats.get('vllm_reschedules', 0))
-                if vllm_preemptions > 0 or vllm_reschedules > 0:
-                    total_preemption_events = vllm_preemptions + vllm_reschedules
-                    preemption_rate = (vllm_preemptions / total_preemption_events * 100) if total_preemption_events > 0 else 0
-                    print(f"      preemption_rate: {preemption_rate:.1f}%")
             
             if lmcache_stats:
                 print(f"    LMCache External Cache:")
@@ -282,37 +347,57 @@ def analyze_logs(memory_utilizations):
             for key, value in stats['conversation_features'].items():
                 print(f"      {key}: {value}")
 
-async def run_all_experiments_concurrently(memory_utilizations):
+async def run_all_experiments_concurrently(configs: list[ExperimentConfig]):
     """Run all experiments concurrently using asyncio"""
-    print(f"Running {len(memory_utilizations)} experiments concurrently...")
-    print(f"Memory utilizations: {memory_utilizations}")
+    print(f"Running {len(configs)} experiments concurrently...")
+    print(f"Configs: {[config.get_key() for config in configs]}")
     
     # Create tasks for all experiments with different GPU devices
     tasks = []
-    for i, memory_util in enumerate(memory_utilizations):
+    for i, config in enumerate(configs):
         gpu_device = i % 8  # Support up to 8 GPUs, cycle if more experiments
-        log_suffix = f"_{memory_util}"
-        task = asyncio.create_task(run_experiment(memory_util, log_suffix, gpu_device))
-        tasks.append((memory_util, task))
-        print(f"  Experiment {memory_util} assigned to GPU {gpu_device}")
+        # Create a new config with the updated gpu_device
+        config_with_gpu = ExperimentConfig(
+            memory_utilization=config.memory_utilization,
+            request_rate=config.request_rate,
+            dataset_path=config.dataset_path,
+            num_prompts=config.num_prompts,
+            time_limit=config.time_limit,
+            gpu_device=gpu_device,
+            server_port=config.server_port,
+            log_suffix=config.log_suffix,
+            use_conversation_eviction=config.use_conversation_eviction
+        )
+        task = asyncio.create_task(run_experiment(config_with_gpu))
+        tasks.append((config_with_gpu, task))
+        print(f"  Experiment {config_with_gpu.get_key()} assigned to GPU {gpu_device}")
     
     # Wait for all experiments to complete
     results = {}
-    for memory_util, task in tasks:
+    for config, task in tasks:
         try:
             success = await task
-            results[memory_util] = success
+            results[config.get_key()] = success
         except Exception as e:
-            print(f"Experiment {memory_util} failed with exception: {e}")
-            results[memory_util] = False
+            print(f"Experiment {config.get_key()} failed with exception: {e}")
+            results[config.get_key()] = False
     
     return results
 
 async def main():
     parser = argparse.ArgumentParser(description="Debug preemption and cache query correlation")
     parser.add_argument("--memory-utilizations", nargs="+", type=float, 
-                        default=[2, 4], 
+                        default=[32, 64], 
                         help="GPU memory utilization values to test")
+    parser.add_argument("--request-rates", nargs="+", type=float, 
+                        default=[1], 
+                        help="Request rate values to test")
+    parser.add_argument("--dataset-paths", nargs="+", type=str,
+                        default=[f'{HOME}/PrefixCacheInternProject/Qdata/cw_logs_5_29_5am_6am.csv'],
+                        help="Dataset paths to test (default: Qdata/cw_logs_5_29_5am_6am.csv)")
+    parser.add_argument("--use-conversation-evictions", nargs="+", type=int, 
+                        default=[0, 1], 
+                        help="Enable conversation-aware eviction policy")
     parser.add_argument("--analyze-only", action="store_true", 
                         help="Only analyze existing logs")
     
@@ -322,18 +407,33 @@ async def main():
         # Ensure no conflicting server processes
         kill_server('')
 
-        print(f"Running experiments with memory utilizations: {args.memory_utilizations}")
+        # Create experiment configurations
+        configs = create_experiment_configs(
+            memory_utilizations=args.memory_utilizations,
+            request_rates=args.request_rates,
+            dataset_paths=args.dataset_paths,
+            use_conversation_evictions=args.use_conversation_evictions
+        )
         
-        results = await run_all_experiments_concurrently(args.memory_utilizations)
+        results = await run_all_experiments_concurrently(configs)
         
         print(f"\n{'='*50}")
         print("EXPERIMENT RESULTS")
         print("="*50)
-        for memory_util, success in results.items():
-            print(f"Memory utilization {memory_util}: {'SUCCESS' if success else 'FAILED'}")
+        for config_key, success in results.items():
+            print(f"{config_key}: {'SUCCESS' if success else 'FAILED'}")
+    else:
+        # For analyze-only mode, create configs from existing log files
+        # This is a simplified approach - you might want to enhance this
+        configs = create_experiment_configs(
+            memory_utilizations=args.memory_utilizations,
+            request_rates=args.request_rates,
+            dataset_paths=args.dataset_paths,
+            use_conversation_evictions=args.use_conversation_evictions
+        )
     
     # Analyze the logs
-    analyze_logs(args.memory_utilizations)
+    analyze_logs(configs)
 
 if __name__ == "__main__":
     asyncio.run(main()) 
