@@ -28,7 +28,6 @@ from constants import (
     CLIENT_CMD_TEMPLATE
 )
 
-@dataclass(frozen=True)
 class ExperimentConfig:
     """Structured configuration for a single experiment"""
     memory_utilization: float
@@ -42,16 +41,17 @@ class ExperimentConfig:
     log_prefix: Optional[str] = None
     log_suffix: Optional[str] = None
     use_conversation_eviction: bool = False
-    
-    def __post_init__(self):
-        if self.server_port is None:
-            object.__setattr__(self, 'server_port', 8000 + int(self.memory_utilization * 10) % 100)
+
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
         if self.log_suffix is None:
             conv_eviction_suffix = "_conv_evict" if self.use_conversation_eviction else ""
             object.__setattr__(self, 'log_suffix', f"_{self.memory_utilization}_{self.request_rate}"
                                f"_{conv_eviction_suffix}")
         if self.log_prefix is None:
             object.__setattr__(self, 'log_prefix', "logs")
+    
     def get_client_args(self) -> Dict[str, Any]:
         """Get client arguments as a dictionary"""
         return {
@@ -61,7 +61,7 @@ class ExperimentConfig:
             'dataset-name': self.dataset_name,
             'host': 'localhost',
             'port': self.server_port,
-            'result-filename': f'{self.log_prefix}/client{self.log_suffix}.log',
+            'result-filename': f'vllm{self.log_suffix}.log',
             'num-prompts': self.num_prompts,
             'use-oracle': 0,
             'request-rate': self.request_rate,  
@@ -356,21 +356,12 @@ async def run_all_experiments_concurrently(configs: list[ExperimentConfig]):
     tasks = []
     for i, config in enumerate(configs):
         gpu_device = i % 8  # Support up to 8 GPUs, cycle if more experiments
-        # Create a new config with the updated gpu_device
-        config_with_gpu = ExperimentConfig(
-            memory_utilization=config.memory_utilization,
-            request_rate=config.request_rate,
-            dataset_path=config.dataset_path,
-            num_prompts=config.num_prompts,
-            time_limit=config.time_limit,
-            gpu_device=gpu_device,
-            server_port=config.server_port,
-            log_suffix=config.log_suffix,
-            use_conversation_eviction=config.use_conversation_eviction
-        )
-        task = asyncio.create_task(run_experiment(config_with_gpu))
-        tasks.append((config_with_gpu, task))
-        print(f"  Experiment {config_with_gpu.get_key()} assigned to GPU {gpu_device}")
+        config.gpu_device = gpu_device
+        config.server_port = 8000 + gpu_device
+
+        task = asyncio.create_task(run_experiment(config))
+        tasks.append((config, task))
+        print(f"  Experiment {config.get_key()} assigned to GPU {gpu_device}")
     
     # Wait for all experiments to complete
     results = {}
@@ -433,7 +424,8 @@ async def main():
         )
     
     # Analyze the logs
-    analyze_logs(configs)
+    successful_configs = [config for config in configs if results.get(config.get_key())]
+    analyze_logs(successful_configs)
 
 if __name__ == "__main__":
     asyncio.run(main()) 
