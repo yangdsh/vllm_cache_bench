@@ -42,7 +42,7 @@ ENV_CONFIGS = {
         'HOME': '/home/ubuntu',
         'DATA_HOME': '/home/ubuntu/vllm_cache_bench',
         'SERVER_COMMAND_SUFFIX': "",
-        'MODEL': "meta-llama/Meta-Llama-3.1-8B-Instruct" # "Qwen/Qwen3-8B-FP8"
+        'MODEL': "meta-llama/Meta-Llama-3.1-8B-Instruct", # "Qwen/Qwen3-32B-FP8", # 
     }
 }
 
@@ -68,8 +68,8 @@ VLLM_SERVER_CMD_TEMPLATE = (
     "VLLM_SERVER_DEV_MODE=1 VLLM_LOGGING_LEVEL=INFO PYTHONUNBUFFERED=1 "
     f"vllm serve {MODEL} --dtype half --gpu_memory_utilization 0.95 --disable-log-requests "
     "--uvicorn-log-level warning "
-    "--max_num_seqs 512 --num-scheduler-steps 1 --max-model-len 16384 --disable_custom_all_reduce "
-    "--enable-chunked-prefill --enable-prefix-caching --pipeline-parallel-size 1 "
+    "--max_num_seqs 128 --num-scheduler-steps 1 --max-model-len 16384 --disable_custom_all_reduce "
+    f"--enable-chunked-prefill --enable-prefix-caching "
     "{args} "
 )
 if ENV == 'fat2':
