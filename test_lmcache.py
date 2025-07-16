@@ -25,7 +25,7 @@ from constants import (
     DIR, 
     SERVER_READY_PATTERN,
     VLLM_SERVER_CMD_TEMPLATE,
-    CLIENT_CMD_TEMPLATE
+    CLIENT_CMD_TEMPLATE,
 )
 
 class ExperimentConfig:
@@ -36,11 +36,14 @@ class ExperimentConfig:
     dataset_path: str = f'set by argument'
     num_prompts: int = 30000
     time_limit: int = 1200
-    gpu_device: int = 0
+    gpu_device: str = "0"
     server_port: Optional[int] = None
     log_prefix: Optional[str] = None
     log_suffix: Optional[str] = None
     use_conversation_eviction: bool = False
+    mock_decoding: bool = False
+    tp_size: int = 2
+    pp_size: int = 1
 
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
@@ -54,7 +57,7 @@ class ExperimentConfig:
     
     def get_client_args(self) -> Dict[str, Any]:
         """Get client arguments as a dictionary"""
-        return {
+        args = {
             'result-dir': self.log_prefix,
             'model': MODEL,
             'endpoint': '/v1/chat/completions',
@@ -72,6 +75,9 @@ class ExperimentConfig:
             'time-limit': self.time_limit,
             'save-result': None,
         }
+        if self.mock_decoding:
+            args['mock-decoding'] = None
+        return args
     
     def get_server_config(self) -> Dict[str, Any]:
         """Get server configuration as a dictionary"""
@@ -82,6 +88,8 @@ class ExperimentConfig:
             'port': self.server_port,
             'size': 4000,
             'scale': 1,
+            'pipeline_parallel_size': self.pp_size,
+            'tensor_parallel_size': self.tp_size,
         }
     
     def get_key(self) -> str:
@@ -93,7 +101,8 @@ def create_experiment_configs(
     memory_utilizations: list[float],
     request_rates: list[float],
     dataset_paths: list[str],
-    use_conversation_evictions: list[bool] = [True]
+    use_conversation_evictions: list[bool] = [True],
+    mock_decoding: bool = False
 ) -> list[ExperimentConfig]:
     """
     Create a list of experiment configurations from parameter lists.
@@ -116,7 +125,8 @@ def create_experiment_configs(
                         memory_utilization=memory_util,
                         request_rate=request_rate,
                         dataset_path=dataset_path,
-                        use_conversation_eviction=use_conversation_eviction
+                        use_conversation_eviction=use_conversation_eviction,
+                        mock_decoding=mock_decoding
                     )
                     configs.append(config)
     
@@ -139,7 +149,9 @@ async def run_experiment(config: ExperimentConfig):
         server_args = (
             f'--port {server_config["port"]} '
             f'--max-num-batched-tokens 16384 '
-            f'--gpu-memory-utilization {0.95} '
+            f'--gpu-memory-utilization {0.8} '
+            f'--pipeline-parallel-size {server_config["pipeline_parallel_size"]} '
+            f'--tensor-parallel-size {server_config["tensor_parallel_size"]} '
             f'--kv-transfer-config \'{json.dumps(kv_config)}\''
         )
         server_prefix = SERVER_COMMAND_PREFIX + f"LMCACHE_MAX_LOCAL_CPU_SIZE={config.memory_utilization} "
@@ -195,7 +207,7 @@ async def run_experiment(config: ExperimentConfig):
 
     # --- Wait for server to be ready ---
     ready = False
-    for i in range(300):  # Reduced timeout for faster testing
+    for i in range(1200):  # Reduced timeout for faster testing
         if os.path.exists(server_log_file):
             with open(server_log_file) as f:
                 if re.search(SERVER_READY_PATTERN, f.read()):
@@ -355,13 +367,14 @@ async def run_all_experiments_concurrently(configs: list[ExperimentConfig]):
     # Create tasks for all experiments with different GPU devices
     tasks = []
     for i, config in enumerate(configs):
-        gpu_device = i % 8  # Support up to 8 GPUs, cycle if more experiments
-        config.gpu_device = gpu_device
-        config.server_port = 8000 + gpu_device
+        _base_gpu_device = i % 8 * config.tp_size * config.pp_size
+        gpu_device = [str(_base_gpu_device + j) for j in range(config.tp_size * config.pp_size)]
+        config.gpu_device = ','.join(gpu_device)
+        config.server_port = 8000 + i
 
         task = asyncio.create_task(run_experiment(config))
         tasks.append((config, task))
-        print(f"  Experiment {config.get_key()} assigned to GPU {gpu_device}")
+        print(f"  Experiment {config.get_key()} assigned to GPU {config.gpu_device}")
     
     # Wait for all experiments to complete
     results = {}
@@ -378,7 +391,7 @@ async def run_all_experiments_concurrently(configs: list[ExperimentConfig]):
 async def main():
     parser = argparse.ArgumentParser(description="Debug preemption and cache query correlation")
     parser.add_argument("--memory-utilizations", nargs="+", type=float, 
-                        default=[32, 64], 
+                        default=[64], 
                         help="GPU memory utilization values to test")
     parser.add_argument("--request-rates", nargs="+", type=float, 
                         default=[1], 
@@ -391,6 +404,8 @@ async def main():
                         help="Enable conversation-aware eviction policy")
     parser.add_argument("--analyze-only", action="store_true", 
                         help="Only analyze existing logs")
+    parser.add_argument("--mock-decoding", action="store_true", 
+                        help="If set, use mock decoding for ConversationalCSVDataset.")
     
     args = parser.parse_args()
 
@@ -403,7 +418,8 @@ async def main():
             memory_utilizations=args.memory_utilizations,
             request_rates=args.request_rates,
             dataset_paths=args.dataset_paths,
-            use_conversation_evictions=args.use_conversation_evictions
+            use_conversation_evictions=args.use_conversation_evictions,
+            mock_decoding=args.mock_decoding
         )
         
         results = await run_all_experiments_concurrently(configs)
