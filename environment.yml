@@ -24,3 +24,4 @@ dependencies:
       - sentence-transformers
       - datasets
       - transformers
+      - seaborn
