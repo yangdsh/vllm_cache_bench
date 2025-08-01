@@ -1,7 +1,7 @@
 from transformers import AutoTokenizer
 
 # Load the tokenizer for Qwen2.5-0.5B
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct", trust_remote_code=True)
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B-FP8", trust_remote_code=True)
 
 # Example: list of token IDs (replace with your actual token list)
 token_ids_list = [

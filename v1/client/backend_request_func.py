@@ -18,12 +18,14 @@ import requests
 from tqdm.asyncio import tqdm
 from transformers import (AutoTokenizer, PreTrainedTokenizer,
                           PreTrainedTokenizerFast)
-from lmcache.logging import init_logger
 from vllm.model_executor.model_loader.weight_utils import get_lock
 
-AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
+# Import conversation utilities
+from conversation_manager import ConversationManager
+# Import cache statistics functionality
+from print_statistics import print_cache_statistics
 
-logger = init_logger(__name__)
+AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 
 @dataclass
 class RequestFuncInput:
@@ -343,9 +345,7 @@ async def async_request_openai_completions(
         pbar.update(1)
     return output
 
-# shared variables
-conversation_history = defaultdict(list)
-conversation_last_time = {}
+conversation_manager = None
 start_time = time.time()
 
 # Statistics tracking class
@@ -436,110 +436,10 @@ class RequestStatistics:
         print(f"Average output length: {stats['avg_output_len']:.1f} tokens")
         
         # Fetch and display cache statistics
-        vllm_hit_ratio = self._print_cache_statistics(api_url)
+        vllm_hit_ratio = print_cache_statistics(api_url)
         
         print("="*70 + "\n")
         self.last_print_count = self.total_requests
-        return vllm_hit_ratio
-    
-    def _print_cache_statistics(self, api_url: str):
-        """Fetch and print prefix cache statistics and conversation analytics"""
-        try:
-            # Get vLLM metrics
-            metrics_url = api_url.replace('v1/chat/completions', 'metrics')
-            response = requests.get(metrics_url, timeout=5)
-            vllm_queries = vllm_hits = "0"
-            vllm_preemptions = "0"
-            
-            for line in response.text.split("\n"):
-                if "prefix_cache_queries_total{" in line:
-                    vllm_queries = line.split(' ')[-1]
-                elif "prefix_cache_hits_total{" in line:
-                    vllm_hits = line.split(' ')[-1]
-                elif "num_preemptions_total{" in line:
-                    vllm_preemptions = line.split(' ')[-1]
-            
-            # Get LMCache metrics and conversation analytics
-            lmcache_queries = lmcache_hits = lmcache_requests = "0"
-            lmcache_hit_rate = "0.0000"
-            conversation_stats = {}
-            
-            try:
-                # Try to get LMCache statistics using CUDA device-based port calculation
-                import os
-                
-                # Get LMCache port based on CUDA_VISIBLE_DEVICES
-                lmcache_port = None
-                cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
-                if cuda_visible and cuda_visible != '':
-                    # Parse device IDs and calculate port
-                    try:
-                        device_ids = [int(x.strip()) for x in cuda_visible.split(',') if x.strip().isdigit()]
-                        if device_ids:
-                            lmcache_port = 9000 + device_ids[0]
-                    except (ValueError, IndexError):
-                        pass
-                
-                # Only try to fetch LMCache statistics if we found a valid port
-                if lmcache_port:
-                    # Extract host from api_url
-                    import re
-                    host_match = re.search(r'(https?://[^:/]+)', api_url)
-                    if host_match:
-                        host_url = host_match.group(1)
-                        lmcache_stats_url = f"{host_url}:{lmcache_port}/lmcache/stats"
-                        
-                        lmcache_response = requests.get(lmcache_stats_url, timeout=2)
-                        if lmcache_response.status_code == 200:
-                            lmcache_data = lmcache_response.json()
-                            
-                            # Extract LMCache stats from the proper wrapper
-                            lmcache_stats = lmcache_data.get('lmcache_stats', {})
-
-                            lmcache_requests = str(lmcache_stats.get('requests', 0))
-                            lmcache_queries = str(lmcache_stats.get('query_tokens', 0))
-                            lmcache_hits = str(lmcache_stats.get('hit_tokens', 0))
-                            lmcache_hit_rate = f"{lmcache_stats.get('hit_rate', 0.0):.4f}"
-                            
-                            # Extract conversation stats if available
-                            conversation_stats = lmcache_data.get('conversation_stats', {})
-                        else:
-                            print("LMCache statistics 404")
-            except (requests.RequestException, json.JSONDecodeError, KeyError, ValueError):
-                print("LMCache statistics error")
-            
-            try:
-                vllm_hit_ratio = float(vllm_hits) / float(vllm_queries) if float(vllm_queries) > 0 else 0
-                
-                # Output only structured statistics for log analysis (no redundant human-readable output)
-                print("\n" + "="*50)
-                print("CLIENT_STATISTICS_BEGIN")
-                print(f"vllm_queries: {vllm_queries}")
-                print(f"vllm_hits: {vllm_hits}")
-                print(f"vllm_hit_rate: {vllm_hit_ratio:.4f}")
-                print(f"vllm_preemptions: {vllm_preemptions}")
-                print(f"lmcache_requests: {lmcache_requests}")
-                print(f"lmcache_queries: {lmcache_queries}")
-                print(f"lmcache_hits: {lmcache_hits}")
-                print(f"lmcache_hit_rate: {lmcache_hit_rate}")
-                
-                # Output conversation analytics in parseable format
-                if conversation_stats:
-                    for key, value in conversation_stats.items():
-                        print(f"conversation_{key}: {value}")
-                
-                print("CLIENT_STATISTICS_END")
-                print("="*50)
-                
-            except (ValueError, ZeroDivisionError):
-                print("-"*50)
-                print("Cache statistics: Error parsing values")
-                
-        except Exception as e:
-            print("-"*50)
-            print(f"Could not fetch cache statistics: {e}")
-            
-        print("-"*50)
         return vllm_hit_ratio
 
 # Global statistics tracker
@@ -550,6 +450,9 @@ async def async_request_openai_chat_completions(
     pbar: Optional[tqdm] = None,
 ) -> RequestFuncOutput:
     global request_stats
+    global conversation_manager
+    if conversation_manager is None:
+        conversation_manager = ConversationManager(request_func_input.tokenizer)
     api_url = request_func_input.api_url
     assert api_url.endswith(
         "chat/completions"
@@ -570,33 +473,28 @@ async def async_request_openai_chat_completions(
         """
         waiting_time = 0.0
         if time.time() - start_time +request_func_input.output_len / 30 > request_func_input.time_limit:
-            logger.info(f"Abort conversation_id: {request_func_input.conversation_id}, "
+            print(f"Abort conversation_id: {request_func_input.conversation_id}, "
               f"turn_id: {request_func_input.turn_id}, "
               f"waiting_time: {waiting_time}, "
               f"input_len: {request_func_input.prompt_len}, "
               f"output_len: {request_func_input.output_len}")
             return False, waiting_time, "timeout_generation_would_exceed_limit"
         if request_func_input.turn_id <= 1:
-            logger.debug(f"Send conversation_id: {request_func_input.conversation_id}, "
+            print(f"Send conv_id: {request_func_input.conversation_id}, "
               f"turn_id: {request_func_input.turn_id}, "
               f"waiting_time: {waiting_time}, "
               f"input_len: {request_func_input.prompt_len}, "
               f"output_len: {request_func_input.output_len}")
             return True, waiting_time, ""
-        logger.debug(f"Wait conversation_id: {request_func_input.conversation_id}, "
-              f"turn_id: {request_func_input.turn_id}, "
-              f"waiting_time: {waiting_time}, "
-              f"input_len: {request_func_input.prompt_len}, "
-              f"output_len: {request_func_input.output_len}")
         
         waiting_start = time.time()
         
-        # Wait until all previous turns are finished
-        cur_turn_id = len(conversation_history[request_func_input.conversation_id]) // 2
+        # Wait until all previous turns are finished - use conversation manager
+        cur_turn_id = conversation_manager.get_conversation_messages_count(request_func_input.conversation_id) // 2
         while cur_turn_id != request_func_input.turn_id - 1:
             await asyncio.sleep(3)
-            cur_turn_id = len(conversation_history[request_func_input.conversation_id]) // 2
-            logger.debug(f"waiting conversation_id: {request_func_input.conversation_id}, "
+            cur_turn_id = conversation_manager.get_conversation_messages_count(request_func_input.conversation_id) // 2
+            print(f"waiting conv_id: {request_func_input.conversation_id}, "
               f"turn_id: {request_func_input.turn_id}, "
               f"cur_turn_id: {cur_turn_id}, "
               f"waiting_time: {waiting_time}, "
@@ -608,7 +506,7 @@ async def async_request_openai_chat_completions(
 
         # Calculate scheduled time based on previous conversation timing
         time_to_schedule = request_func_input.interval
-        scheduled_time = conversation_last_time[request_func_input.conversation_id] + time_to_schedule
+        scheduled_time = conversation_manager.conversation_last_time.get(request_func_input.conversation_id, time.time()) + time_to_schedule
         
         # Check if request would exceed time limit
         if scheduled_time - start_time + request_func_input.output_len / 30 > request_func_input.time_limit:
@@ -620,7 +518,7 @@ async def async_request_openai_chat_completions(
         waiting_time = time.time() - waiting_start
         if request_func_input.interval == 0:
             waiting_time = 0
-        logger.debug(f"Send conversation_id: {request_func_input.conversation_id}, "
+        print(f"Send conv_id: {request_func_input.conversation_id}, "
               f"turn_id: {request_func_input.turn_id}, "
               f"waiting_time: {waiting_time}, "
               f"input_len: {request_func_input.prompt_len}, "
@@ -640,39 +538,12 @@ async def async_request_openai_chat_completions(
 
     # Track follow-up requests
     is_follow_up = request_func_input.turn_id > 1
-
-    def print_conversation_history(conversation_id):
-        for message in conversation_history[conversation_id]:
-            print(f"role: {message['role']}\n{message['content']}\n")
     
-    def get_messages(request_func_input):
-        user_message = {
-            "role": "user",
-            "content": request_func_input.prompt,
-        }
-        conversation_id = request_func_input.conversation_id
-        if conversation_id <= 0:
-            return [user_message]
-
-        content = [{"type": "text", "text": request_func_input.prompt}]
-        if request_func_input.multi_modal_content:
-            content.append(request_func_input.multi_modal_content)
-        conversation_history[conversation_id].append(user_message)
-        # print_conversation_history(conversation_id)
-        return conversation_history[conversation_id]
-    
-    def update_conversation(conversation_id, generated_text):
-        conversation_history[conversation_id].append(
-            {
-                "role": "assistant",
-                "content": [{"type": "text", "text": generated_text}],
-            }
-        )
-        logger.debug(f"Done conversation: {conversation_id}")
-        conversation_last_time[conversation_id] = time.time()
-    
-    # Calculate message length (including conversation history)
-    messages = get_messages(request_func_input)
+    # Calculate message length (including conversation history) - use conversation manager
+    conversation_manager.add_user_message(request_func_input.conversation_id, 
+                                          request_func_input.prompt, 
+                                          request_func_input.multi_modal_content)
+    messages = conversation_manager.get_all_messages(request_func_input.conversation_id)
     if request_func_input.tokenizer:
         try:
             prompt = request_func_input.tokenizer.apply_chat_template(messages, tokenize=True)
@@ -757,7 +628,8 @@ async def async_request_openai_chat_completions(
                             most_recent_timestamp = timestamp
 
                     output.generated_text = generated_text
-                    update_conversation(request_func_input.conversation_id, generated_text)
+                    # Use conversation manager to update conversation
+                    conversation_manager.add_gpt_message(request_func_input.conversation_id, generated_text)
                     output.success = True
                     output.latency = most_recent_timestamp - st
                     #print(request_func_input.conversation_id, request_func_input.turn_id,
@@ -766,7 +638,8 @@ async def async_request_openai_chat_completions(
                     output.error = response.reason or ""
                     output.success = False
                     error_text = await response.text()
-                    update_conversation(request_func_input.conversation_id, "Error")
+                    # Use conversation manager to update conversation with error
+                    conversation_manager.add_gpt_message(request_func_input.conversation_id, "Error")
                     request_stats.add_error(f"HTTP_{response.status}_{response.reason or 'Unknown'}")
                     # print("Response status:", response.status)
                     # print("Response headers:", response.headers)
@@ -781,7 +654,15 @@ async def async_request_openai_chat_completions(
         request_stats.complete_request()
         
         # Add request to statistics
-        actual_output_len = output.output_tokens if output.output_tokens else len(generated_text.split())
+        actual_output_len = output.output_tokens if output.output_tokens else -1
+        if actual_output_len != request_func_input.output_len:
+            print(f"[Bug] Mismatch output_len: {request_func_input.output_len}, "
+                  f"actual_output_len: {actual_output_len}"
+            )
+        print(f"Done conv_id: {request_func_input.conversation_id}, "
+              f"output_len: {request_func_input.output_len},"
+              f"turn_id: {request_func_input.turn_id}"
+        )
         if output.success:    
             request_stats.add_request(
                 prompt_len=request_func_input.prompt_len,

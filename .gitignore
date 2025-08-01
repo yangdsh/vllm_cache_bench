@@ -6,3 +6,4 @@ v1/plotting/plots
 *.out
 __*
 *.csv
+*.png

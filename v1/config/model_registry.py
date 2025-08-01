@@ -20,6 +20,7 @@ class ModelSpec:
     """Immutable model specification"""
     name: str
     huggingface_path: str
+    quantization: str = None
     tensor_parallel_size: int = 1
     pipeline_parallel_size: int = 1
     max_model_length: int = 16384
@@ -104,7 +105,9 @@ class ModelRegistry:
             name="llama-70b",
             huggingface_path="meta-llama/Llama-3.3-70B-Instruct",
             max_model_length=16384,
-            pipeline_parallel_size=4,
+            quantization="fp8",
+            tensor_parallel_size=4,
+            pipeline_parallel_size=1,
         ))
         
         # Large models requiring multiple GPUs

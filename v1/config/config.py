@@ -20,7 +20,7 @@ class CacheEvictionStrategy(Enum):
     CONVERSATION_AWARE = "conversation_aware"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=False)
 class ExperimentConfiguration:
     """Immutable experiment configuration with clear naming"""
     
@@ -31,9 +31,9 @@ class ExperimentConfiguration:
     
     # Dataset configuration
     dataset_type: DatasetType = DatasetType.CONVERSATIONAL_CSV
-    dataset_file_path: str = '../data/cw_logs_5_29_5am_6am.csv'
+    dataset_file_path: str = '../data/test_data.csv'
     max_prompt_count: int = 30000
-    time_limit_seconds: int = 60
+    time_limit_seconds: int = 600
     
     # Infrastructure configuration  
     gpu_memory_size_gb: float = 40.0
@@ -63,7 +63,7 @@ class ExperimentConfiguration:
         else:
             eviction_suffix = ""
         return (f"_{self.cache_size_gb}gb_{self.request_rate_per_second}rps{eviction_suffix}"
-                f"_{self.dataset_file_path.split('.')[-2][-10:]}")
+                f"_{self.dataset_file_path.split('/')[-1].split('.')[0][-10:]}")
     
     def get_log_directory(self) -> str:
         """Get log directory, defaulting to 'logs' if not specified"""

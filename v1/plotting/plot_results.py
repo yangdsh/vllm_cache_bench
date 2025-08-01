@@ -1,4 +1,5 @@
 import json
+from PIL.TiffTags import TagInfo
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -46,26 +47,34 @@ class ResultPlotter:
 
             model_name = dataset_df['model_name'].iloc[0]
 
-            for metric in metrics:
-                plt.figure(figsize=(4, 4))
-                
-                # Use 'cache_eviction_strategy' for hue and 'cache_size_gb' for x-axis
-                sns.lineplot(data=dataset_df, x='cache_size_gb', y=metric, hue='cache_eviction_strategy', marker='o')
-                
-                plt.xlabel("Cache Size (GB)")
-                plt.ylabel(metric)
-                # plt.grid(True)
-                
-                plot_filename = f"{dataset}_{model_name}_{metric}.png"
-                plt.savefig(os.path.join(output_dir, plot_filename), dpi=300)
-                plt.close()
-                print(f"Saved plot: {plot_filename}")
+            # Create a 2x2 subplot for the four metrics
+            fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+            axes = axes.flatten()
+
+            for idx, metric in enumerate(metrics):
+                ax = axes[idx]
+                sns.lineplot(data=dataset_df, x='cache_size_gb', y=metric, hue='cache_eviction_strategy', marker='o', ax=ax)
+                ax.set_xlabel("Cache Size (GB)")
+                ax.set_ylabel(metric)
+                ax.set_title(metric)
+                # ax.grid(True)
+                if idx == 0:
+                    ax.legend(title='Eviction Strategy')
+                else:
+                    ax.get_legend().remove()
+
+            plt.tight_layout()
+            plot_filename = f"{dataset}_{model_name}_all_metrics.png"
+            plt.savefig(os.path.join(output_dir, plot_filename), dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"Saved combined plot: {plot_filename}")
 
 
 if __name__ == '__main__':
     # Adjust the file path and output directory as needed
-    file_path = '../experiment_logs/qwen8b_2025-07-23/summary.json'
-    output_dir = 'plots'
+    tag = 'qwen8b_2025-07-30'
+    file_path = f'../experiment_logs/{tag}/summary.json'
+    output_dir = tag
     
     plotter = ResultPlotter(file_path)
     
@@ -73,7 +82,7 @@ if __name__ == '__main__':
     metrics_to_plot = [
         'mean_ttft_ms', 
         'p99_ttft_ms',
-        'vllm_hit_rate',
+        'lmcache_retrieved_rate',
         'lmcache_hit_rate'
     ]
     

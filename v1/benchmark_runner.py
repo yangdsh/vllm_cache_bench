@@ -8,8 +8,8 @@ import argparse
 
 from config.config import create_default_experiment
 from environment.environment_provider import EnvironmentProvider
-from execution.resource_manager import ExperimentResourceManager
-from execution.runner import create_experiment_runner
+from runner.resource_manager import ExperimentResourceManager
+from runner.runner import create_experiment_runner
 from config.config_loader import load_experiments_from_yaml
 
 
@@ -62,6 +62,7 @@ async def run_single_experiment_demo():
     
     # Create a simple experiment
     experiment = create_default_experiment()
+    experiment.model_name = "qwen-8b" # "llama-70b"
     print(f"Running experiment: {experiment.get_experiment_identifier()}")
     print(f"Model: {experiment.model_name}")
     print(f"Cache size: {experiment.cache_size_gb} GB")

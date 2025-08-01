@@ -1,7 +1,7 @@
 # GPU Cache Experiment Configuration
 # Comprehensive cache pressure study with conversational vs non-conversational workloads
 
-tag: "qwen8b"
+tag: "qwen-8b"
 log_base_dir: "experiment_logs"
 model_name: "qwen-8b"
 
@@ -15,7 +15,7 @@ experiments:
     datasets:
       - path: "../data/cw_logs_5_29_5am_6am.csv"
         cache_sizes: [64, 128, 256]
-        request_rates: [1.0]
+        request_rates: [0.9]
       - path: "../data/cw_logs_5_28_19pm_20pm.csv"
         cache_sizes: [64, 128, 256]
-        request_rates: [0.7]
+        request_rates: [0.35]

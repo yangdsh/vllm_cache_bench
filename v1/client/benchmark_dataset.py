@@ -36,6 +36,9 @@ from vllm.lora.utils import get_adapter_absolute_path
 from vllm.multimodal import MultiModalDataDict
 from vllm.transformers_utils.tokenizer import AnyTokenizer, get_lora_tokenizer
 
+# Import conversation utilities
+from conversation_manager import ConversationManager
+
 # -----------------------------------------------------------------------------
 # Data Classes
 # -----------------------------------------------------------------------------
@@ -837,7 +840,7 @@ class ConversationalCSVDataset(BenchmarkDataset):
         self.mock_decoding = mock_decoding
         super().__init__(**kwargs)
         self.load_data()
-        self.load_sonnet_text()
+        self.conversation_manager = None
 
     def load_data(self) -> None:
         if self.dataset_path is None:
@@ -879,22 +882,6 @@ class ConversationalCSVDataset(BenchmarkDataset):
         
         random.seed(self.random_seed)
 
-    def load_sonnet_text(self) -> None:
-        """Load sonnet text for generating realistic prompts."""
-        import os
-        # Use relative path from the current file's directory
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        sonnet_path = os.path.join(current_dir, 'sonnet.txt')
-        
-        try:
-            with open(sonnet_path, 'r', encoding='utf-8') as f:
-                self.sonnet_text = f.read()
-            print(f"Loaded sonnet text: {len(self.sonnet_text)} characters")
-        except FileNotFoundError:
-            print(f"Warning: Could not find sonnet.txt at {sonnet_path}, falling back to simple text")
-            # Fallback text if sonnet.txt is not found
-            self.sonnet_text = "The quick brown fox jumps over the lazy dog. " * 1000
-
     def sample(self,
                tokenizer: 'PreTrainedTokenizerBase',
                num_requests: int,
@@ -907,6 +894,9 @@ class ConversationalCSVDataset(BenchmarkDataset):
                max_active_conversations: int = 100,  # Ignored - kept for compatibility
                time_limit: int = 10000,
                **kwargs) -> list:
+        if self.conversation_manager is None:
+            self.conversation_manager = ConversationManager(tokenizer)
+        
         samples: list = []
         vocab_size = tokenizer.vocab_size
         
@@ -956,9 +946,11 @@ class ConversationalCSVDataset(BenchmarkDataset):
             if int_conversation_id == next_conversation_int_id:
                 next_conversation_int_id += 1
             
-            # Generate prompt using sonnet text
-            prompt = self._generate_prompt(current_tokenizer, prompt_tokens, i, 
-                                           int_conversation_id)
+            # Generate prompt using sonnet text - use conversation utility function
+            prompt = self.conversation_manager.generate_prompt( 
+                prompt_tokens, 
+                int_conversation_id
+            )
             actual_prompt_len = len(current_tokenizer.encode(prompt, add_special_tokens=False))
             
             current_sample = SampleRequest(
@@ -973,31 +965,6 @@ class ConversationalCSVDataset(BenchmarkDataset):
             samples.append(current_sample)
 
         return samples
-
-    def _generate_prompt(self, tokenizer, prompt_tokens: int, request_index: int, 
-                         conversation_id: int) -> str:
-        """Generate a prompt with the specified number of tokens using sonnet text."""
-        # Calculate starting position in sonnet text, wrapping around if needed
-        sonnet_start = request_index % len(self.sonnet_text)
-        
-        # Extract text segment and create tokens
-        text_segment = str(conversation_id) + " " 
-        text_segment += self.sonnet_text[sonnet_start:sonnet_start + prompt_tokens * 10]
-        if len(text_segment) < prompt_tokens * 10:  # If near end of file, wrap around
-            text_segment += self.sonnet_text[:prompt_tokens * 10]
-        
-        # Tokenize the text segment and get the desired number of tokens
-        token_ids = tokenizer.encode(text_segment, add_special_tokens=False)[:prompt_tokens]
-        
-        # Pad with repeated text if we don't have enough tokens
-        while len(token_ids) < prompt_tokens:
-            additional_text = text_segment
-            additional_tokens = tokenizer.encode(additional_text, add_special_tokens=False)
-            token_ids.extend(additional_tokens[:prompt_tokens - len(token_ids)])
-        
-        # Ensure we have exactly the right number of tokens
-        token_ids = token_ids[:prompt_tokens]
-        return tokenizer.decode(token_ids)
 
     def _track_conversation(self, original_conversation_id: str, conversation_tracker: dict, 
                           next_int_id: int) -> tuple[int, int]:

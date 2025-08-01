@@ -51,14 +51,13 @@ class ServerCommandBuilder:
         """Build vLLM-specific command arguments"""
         base_args = [
             "--dtype half",
-            # "--quantization fp8",
-            "--gpu_memory_utilization 0.95",
+            f"--quantization {model_spec.quantization}" if model_spec.quantization else "",
+            "--gpu_memory_utilization 0.8",
             "--disable-log-requests",
             "--uvicorn-log-level warning",
             "--max_num_seqs 128",
             "--num-scheduler-steps 1",
             f"--max-model-len {model_spec.max_model_length}",
-            # "--disable_custom_all_reduce",
             "--enable-chunked-prefill",
             "--enable-prefix-caching",
             f"--port {experiment_context.assigned_server_port}"
@@ -82,7 +81,8 @@ class ServerCommandBuilder:
         """Build LMCache-specific arguments"""
         kv_connector_config = {"kv_connector": "LMCacheConnectorV1", "kv_role": "kv_both"}
         args = [
-            "--max-num-batched-tokens 16384",
+            # todo: p/d disaggregation
+            "--max-num-batched-tokens 16384", # this disables chunked prefill
             f"--kv-transfer-config '{json.dumps(kv_connector_config)}'"
         ]
         return args
@@ -106,7 +106,10 @@ class ServerCommandBuilder:
         base_prefix = self.environment_settings.shell_command_prefix
         
         if self.environment_provider.is_environment_type(Environment.LMCACHE):
-            cache_prefix = f"LMCACHE_MAX_LOCAL_CPU_SIZE={config.cache_size_gb}"
+            # Divide cache size by total GPU requirement for multi-GPU setups
+            total_gpus = config.get_total_gpu_requirement()
+            local_cpu_cache_size = config.cache_size_gb / total_gpus
+            cache_prefix = f"LMCACHE_MAX_LOCAL_CPU_SIZE={local_cpu_cache_size}"
             
             # Add conversation eviction configuration
             if config.cache_eviction_strategy == CacheEvictionStrategy.CONVERSATION_AWARE:
@@ -130,7 +133,7 @@ class ClientCommandBuilder:
         client_arguments = self._build_client_arguments(config, experiment_context)
         
         base_command = (
-            "PYTHONUNBUFFERED=1 python client/benchmark_serving.py "
+            "LMCACHE_LOG_LEVEL=DEBUG PYTHONUNBUFFERED=1 python client/benchmark_serving.py "
             f"{client_arguments}"
         )
         

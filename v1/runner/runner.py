@@ -178,6 +178,8 @@ class ExperimentExecutor:
                 stdout=server_log_file,
                 stderr=server_log_file
             )
+            server_log_file.write(f"Server command: {server_command}\n")
+            server_log_file.flush()
             # Store log file reference for cleanup
             server_process._log_file = server_log_file
             return server_process
@@ -338,6 +340,7 @@ class BatchExperimentRunner:
             batch_results = await self.run_experiment_batch(batch_configs)
             all_results.extend(batch_results)
         
+        kill_server('')
         return all_results
 
 
