@@ -107,6 +107,10 @@ class YAMLExperimentConfigLoader:
         if not isinstance(eviction_strategies, list):
             eviction_strategies = [eviction_strategies]
         
+        # Get conversation eviction config (can be dataset-specific or global)
+        conversation_eviction_config = dataset_config.get('conversation_eviction_config', 
+            global_defaults.get('conversation_eviction_config', None))
+        
         # Generate all combinations
         for cache_size in cache_sizes:
             for request_rate in request_rates:
@@ -122,9 +126,14 @@ class YAMLExperimentConfigLoader:
                         )
                     }
                     
+                    # Add conversation eviction config if using conversation-aware strategy
+                    if use_conversation_eviction and conversation_eviction_config is not None:
+                        config_params['conversation_eviction_config'] = conversation_eviction_config
+                    
                     # Add other dataset-specific parameters
                     for key, value in dataset_config.items():
-                        if key not in ['path', 'cache_sizes', 'request_rates', 'use_conversation_eviction']:
+                        if key not in ['path', 'cache_sizes', 'request_rates', 
+                                       'use_conversation_eviction', 'conversation_eviction_config']:
                             # Map old parameter names to new ones
                             if key == 'num_prompts':
                                 config_params['max_prompt_count'] = value
@@ -192,6 +201,10 @@ class YAMLExperimentConfigLoader:
                         # Set cache eviction strategy
                         eviction_strategy = config_dict.get('cache_eviction_strategy', CacheEvictionStrategy.STANDARD)
                         builder.with_cache_eviction_strategy(eviction_strategy)
+                        
+                        # Set conversation eviction config if specified
+                        if config_dict.get('conversation_eviction_config') is not None:
+                            builder.with_conversation_eviction_config(config_dict['conversation_eviction_config'])
                         
                         # Set limits
                         max_prompts = config_dict.get('max_prompt_count', experiment_defaults.get('num_prompts', 30000))

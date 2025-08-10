@@ -56,7 +56,8 @@ except ImportError:
 from benchmark_dataset import (BurstGPTDataset, ConversationalCSVDataset, HuggingFaceDataset,
                                RandomDataset, SampleRequest, ShareGPTDataset,
                                SonnetDataset, VisionArenaDataset)
-from benchmark_utils import convert_to_pytorch_benchmark_format, write_to_json
+from benchmark_utils import write_to_json
+from vllm.benchmarks.utils import convert_to_pytorch_benchmark_format
 
 MILLISECONDS_TO_SECONDS_CONVERSION = 1000
 

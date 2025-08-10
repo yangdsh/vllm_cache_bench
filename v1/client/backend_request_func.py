@@ -19,11 +19,47 @@ from tqdm.asyncio import tqdm
 from transformers import (AutoTokenizer, PreTrainedTokenizer,
                           PreTrainedTokenizerFast)
 from vllm.model_executor.model_loader.weight_utils import get_lock
+import logging
+import time
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+# Custom formatter to match the exact format [2025-08-07 03:54:01,144]
+class CustomFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created)
+        if datefmt:
+            # Format the date/time without microseconds
+            formatted = dt.strftime('%Y-%m-%d %H:%M:%S')
+            # Get milliseconds and append with comma
+            milliseconds = int(dt.microsecond / 1000)
+            return f"{formatted},{milliseconds:03d}"
+        else:
+            return dt.strftime('%Y-%m-%d %H:%M:%S,%f')
+
+# Configure the logger to include timestamps
+if not logger.handlers:  # Only configure if no handlers exist
+    # Clear any existing handlers to prevent duplicates
+    logger.handlers.clear()
+    
+    handler = logging.StreamHandler()
+    formatter = CustomFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+                              datefmt='[%Y-%m-%d %H:%M:%S,%f]')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    
+    # Prevent propagation to root logger to avoid duplicate output
+    logger.propagate = False
+
+# Add the parent directory to the path so we can import util
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import conversation utilities
-from conversation_manager import ConversationManager
+from util.conversation_manager import ConversationManager
 # Import cache statistics functionality
-from print_statistics import print_cache_statistics
+from util.print_statistics import print_cache_statistics
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 
@@ -473,14 +509,14 @@ async def async_request_openai_chat_completions(
         """
         waiting_time = 0.0
         if time.time() - start_time +request_func_input.output_len / 30 > request_func_input.time_limit:
-            print(f"Abort conversation_id: {request_func_input.conversation_id}, "
+            logger.info(f"Abort conversation_id: {request_func_input.conversation_id}, "
               f"turn_id: {request_func_input.turn_id}, "
               f"waiting_time: {waiting_time}, "
               f"input_len: {request_func_input.prompt_len}, "
               f"output_len: {request_func_input.output_len}")
             return False, waiting_time, "timeout_generation_would_exceed_limit"
         if request_func_input.turn_id <= 1:
-            print(f"Send conv_id: {request_func_input.conversation_id}, "
+            logger.info(f"Send conv_id: {request_func_input.conversation_id}, "
               f"turn_id: {request_func_input.turn_id}, "
               f"waiting_time: {waiting_time}, "
               f"input_len: {request_func_input.prompt_len}, "
@@ -494,7 +530,7 @@ async def async_request_openai_chat_completions(
         while cur_turn_id != request_func_input.turn_id - 1:
             await asyncio.sleep(3)
             cur_turn_id = conversation_manager.get_conversation_messages_count(request_func_input.conversation_id) // 2
-            print(f"waiting conv_id: {request_func_input.conversation_id}, "
+            logger.info(f"waiting conv_id: {request_func_input.conversation_id}, "
               f"turn_id: {request_func_input.turn_id}, "
               f"cur_turn_id: {cur_turn_id}, "
               f"waiting_time: {waiting_time}, "
@@ -518,7 +554,7 @@ async def async_request_openai_chat_completions(
         waiting_time = time.time() - waiting_start
         if request_func_input.interval == 0:
             waiting_time = 0
-        print(f"Send conv_id: {request_func_input.conversation_id}, "
+        logger.info(f"Send conv_id: {request_func_input.conversation_id}, "
               f"turn_id: {request_func_input.turn_id}, "
               f"waiting_time: {waiting_time}, "
               f"input_len: {request_func_input.prompt_len}, "
@@ -542,6 +578,7 @@ async def async_request_openai_chat_completions(
     # Calculate message length (including conversation history) - use conversation manager
     conversation_manager.add_user_message(request_func_input.conversation_id, 
                                           request_func_input.prompt, 
+                                          request_func_input.prompt_len,
                                           request_func_input.multi_modal_content)
     messages = conversation_manager.get_all_messages(request_func_input.conversation_id)
     if request_func_input.tokenizer:
@@ -629,7 +666,9 @@ async def async_request_openai_chat_completions(
 
                     output.generated_text = generated_text
                     # Use conversation manager to update conversation
-                    conversation_manager.add_gpt_message(request_func_input.conversation_id, generated_text)
+                    conversation_manager.add_gpt_message(request_func_input.conversation_id, 
+                                                         generated_text, 
+                                                         output.output_tokens)
                     output.success = True
                     output.latency = most_recent_timestamp - st
                     #print(request_func_input.conversation_id, request_func_input.turn_id,
@@ -639,7 +678,9 @@ async def async_request_openai_chat_completions(
                     output.success = False
                     error_text = await response.text()
                     # Use conversation manager to update conversation with error
-                    conversation_manager.add_gpt_message(request_func_input.conversation_id, "Error")
+                    conversation_manager.add_gpt_message(request_func_input.conversation_id, 
+                                                         "Error", 
+                                                         0)
                     request_stats.add_error(f"HTTP_{response.status}_{response.reason or 'Unknown'}")
                     # print("Response status:", response.status)
                     # print("Response headers:", response.headers)
@@ -649,18 +690,18 @@ async def async_request_openai_chat_completions(
             exc_info = sys.exc_info()
             output.error = "".join(traceback.format_exception(*exc_info))
             request_stats.add_error("Exception")
-            print(output.error)
+            logger.info(output.error)
         
         request_stats.complete_request()
         
         # Add request to statistics
         actual_output_len = output.output_tokens if output.output_tokens else -1
         if actual_output_len != request_func_input.output_len:
-            print(f"[Bug] Mismatch output_len: {request_func_input.output_len}, "
+            logger.info(f"[Bug] Mismatch output_len: {request_func_input.output_len}, "
                   f"actual_output_len: {actual_output_len}"
             )
-        print(f"Done conv_id: {request_func_input.conversation_id}, "
-              f"output_len: {request_func_input.output_len},"
+        logger.info(f"Done conv_id: {request_func_input.conversation_id}, "
+              f"output_len: {request_func_input.output_len}, "
               f"turn_id: {request_func_input.turn_id}"
         )
         if output.success:    

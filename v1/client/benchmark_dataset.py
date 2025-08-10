@@ -36,8 +36,13 @@ from vllm.lora.utils import get_adapter_absolute_path
 from vllm.multimodal import MultiModalDataDict
 from vllm.transformers_utils.tokenizer import AnyTokenizer, get_lora_tokenizer
 
+import sys
+import os
+# Add the parent directory to the path so we can import util
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # Import conversation utilities
-from conversation_manager import ConversationManager
+from util.conversation_manager import ConversationManager
 
 # -----------------------------------------------------------------------------
 # Data Classes

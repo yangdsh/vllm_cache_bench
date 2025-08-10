@@ -15,7 +15,7 @@ from environment.environment_provider import EnvironmentProvider
 from config.command_builder import CommandFactory
 from .resource_manager import ExperimentResourceManager
 from .log_analyzer import LogAnalyzer
-from utils import kill_server
+from util.common import kill_server
 
 
 @dataclass

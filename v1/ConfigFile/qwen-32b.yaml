@@ -18,4 +18,4 @@ experiments:
         request_rates: [1.0]
       - path: "../data/cw_logs_5_28_19pm_20pm.csv"
         cache_sizes: [128, 256, 512]
-        request_rates: [0.7]
+        request_rates: [0.5]

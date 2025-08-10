@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+'''
+cd ~/PrefixCacheInternProject/vllm_cache_bench/v1
+python benchmark_runner.py --yaml ConfigFile/qwen-8b.yaml
+'''
+
 """
 Main script to run batch experiments with improved architecture.
 Demonstrates usage of the experiment runner with various configurations.
@@ -6,7 +11,7 @@ Demonstrates usage of the experiment runner with various configurations.
 import asyncio
 import argparse
 
-from config.config import create_default_experiment
+from config.config import create_default_experiment, CacheEvictionStrategy
 from environment.environment_provider import EnvironmentProvider
 from runner.resource_manager import ExperimentResourceManager
 from runner.runner import create_experiment_runner
@@ -63,8 +68,11 @@ async def run_single_experiment_demo():
     # Create a simple experiment
     experiment = create_default_experiment()
     experiment.model_name = "qwen-8b" # "llama-70b"
+    experiment.cache_eviction_strategy = CacheEvictionStrategy.CONVERSATION_AWARE
+    
     print(f"Running experiment: {experiment.get_experiment_identifier()}")
     print(f"Model: {experiment.model_name}")
+    print(f"Conversation aware: {experiment.cache_eviction_strategy}")
     print(f"Cache size: {experiment.cache_size_gb} GB")
     print(f"Request rate: {experiment.request_rate_per_second} req/s")
     

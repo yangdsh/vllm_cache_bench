@@ -72,7 +72,7 @@ class ResultPlotter:
 
 if __name__ == '__main__':
     # Adjust the file path and output directory as needed
-    tag = 'qwen8b_2025-07-30'
+    tag = 'qwen-8b_2025-08-09'
     file_path = f'../experiment_logs/{tag}/summary.json'
     output_dir = tag
     

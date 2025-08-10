@@ -114,6 +114,11 @@ class ServerCommandBuilder:
             # Add conversation eviction configuration
             if config.cache_eviction_strategy == CacheEvictionStrategy.CONVERSATION_AWARE:
                 extra_config = {"use_conversation_eviction": True}
+                
+                # Add conversation eviction config if specified
+                if config.conversation_eviction_config is not None:
+                    extra_config["conversation_eviction_config"] = config.conversation_eviction_config
+                
                 cache_prefix += f" LMCACHE_EXTRA_CONFIG='{json.dumps(extra_config)}'"
             
             return f"{base_prefix} {cache_prefix}".strip()

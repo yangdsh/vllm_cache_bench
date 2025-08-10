@@ -3,20 +3,25 @@
 This module provides utility functions for conversation management and prompt generation
 """
 
+import json
 import os
+import random
+import re
 import time
 from collections import defaultdict
 from typing import Dict, List, Optional, Any
 
-from lmcache.logging import init_logger
-
-logger = init_logger(__name__)
+# Standard logging instead of lmcache.logging
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class ConversationManager:
     """Manages conversation history and message handling"""
     
     def __init__(self, tokenizer):
         self.conversation_history: Dict[int, List[Dict]] = defaultdict(list)
+        self.conversation_token_count: Dict[int, int] = defaultdict(int)
         self.conversation_last_time: Dict[int, float] = {}
         self.sonnet_text: Optional[str] = None
         self.tokenizer = tokenizer
@@ -76,7 +81,7 @@ class ConversationManager:
         else:
             return ''
     
-    def add_user_message(self, conversation_id: int, prompt: str, 
+    def add_user_message(self, conversation_id: int, prompt: str, prompt_len: int,
                     multi_modal_content: Optional[Dict] = None) -> List[Dict]:
         """
         Get conversation messages for a given conversation.
@@ -96,6 +101,7 @@ class ConversationManager:
             user_message["content"] = content
         
         self.conversation_history[conversation_id].append(user_message)
+        self.conversation_token_count[conversation_id] += prompt_len
 
     def get_all_messages(self, conversation_id: int) -> List[Dict]:
         """
@@ -106,7 +112,7 @@ class ConversationManager:
         #    print(f"{len(self.tokenizer.encode(message['content']))}")
         return self.conversation_history.get(conversation_id, [])
     
-    def add_gpt_message(self, conversation_id: int, generated_text: str):
+    def add_gpt_message(self, conversation_id: int, generated_text: str, token_count: int):
         """
         Update conversation with assistant response.
         
@@ -124,6 +130,7 @@ class ConversationManager:
         }
         
         self.conversation_history[conversation_id].append(assistant_message)
+        self.conversation_token_count[conversation_id] += token_count
         self.conversation_last_time[conversation_id] = time.time()
     
     def print_conversation_history(self, conversation_id: int):
@@ -157,18 +164,25 @@ class ConversationManager:
         """Get message count for a specific conversation"""
         return len(self.conversation_history.get(conversation_id, []))
 
+    def get_token_count(self, conversation_id: int) -> int:
+        """Get total length of messages for a specific conversation"""
+        return self.conversation_token_count.get(conversation_id, 0)
+
     def clear_conversation(self, conversation_id: int):
         """Clear a specific conversation"""
         if conversation_id in self.conversation_history:
             del self.conversation_history[conversation_id]
         if conversation_id in self.conversation_last_time:
             del self.conversation_last_time[conversation_id]
-    
+        if conversation_id in self.conversation_token_count:
+            del self.conversation_token_count[conversation_id]
+
     def clear_all_conversations(self):
         """Clear all conversation history"""
         self.conversation_history.clear()
         self.conversation_last_time.clear()
-    
+        self.conversation_token_count.clear()
+
     def get_conversation_stats(self) -> Dict[str, Any]:
         """Get comprehensive conversation statistics"""
         total_conversations = self.get_conversation_count()

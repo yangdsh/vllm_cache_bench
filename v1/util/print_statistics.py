@@ -69,6 +69,16 @@ def print_lmcache_statistics(api_url: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing LMCache statistics
     """    
+    lmcache_stats = {
+        'requests': 0,
+        'query_tokens': 0,
+        'hit_tokens': 0,
+        'retrieved_tokens': 0,
+        'hit_rate': 0.0,
+        'retrieved_rate': 0.0
+    }
+    conversation_stats = {}
+    
     try:
         # Try to get LMCache statistics using CUDA device-based port calculation
         lmcache_port = None
@@ -98,21 +108,23 @@ def print_lmcache_statistics(api_url: str) -> Dict[str, Any]:
                     conversation_stats = lmcache_data.get('conversation_stats', {})
                 else:
                     print("LMCache statistics 404")
-    except (requests.RequestException, json.JSONDecodeError, KeyError, ValueError):
-        print("LMCache statistics error")
+    except (requests.RequestException, json.JSONDecodeError, KeyError, ValueError) as e:
+        print(f"LMCache statistics error: {e}")
     
     # Print LMCache statistics
-    print(f"lmcache_requests: {lmcache_stats['requests']}")
-    print(f"lmcache_queries: {lmcache_stats['query_tokens']}")
-    print(f"lmcache_hits: {lmcache_stats['hit_tokens']}")
-    print(f"lmcache_retrieved_tokens: {lmcache_stats['retrieved_tokens']}")
-    print(f"lmcache_hit_rate: {lmcache_stats['hit_rate']:.4f}")
-    print(f"lmcache_retrieved_rate: {lmcache_stats['retrieved_rate']:.4f}")
+    print(f"lmcache_requests: {lmcache_stats.get('requests', 0)}")
+    print(f"lmcache_queries: {lmcache_stats.get('query_tokens', 0)}")
+    print(f"lmcache_hits: {lmcache_stats.get('hit_tokens', 0)}")
+    print(f"lmcache_retrieved_tokens: {lmcache_stats.get('retrieved_tokens', 0)}")
+    print(f"lmcache_hit_rate: {lmcache_stats.get('hit_rate', 0.0):.4f}")
+    print(f"lmcache_retrieved_rate: {lmcache_stats.get('retrieved_rate', 0.0):.4f}")
     
     # Output conversation analytics in parseable format
     if conversation_stats:
         for key, value in conversation_stats.items():
             print(f"conversation_{key}: {value}")
+    
+    return lmcache_stats
 
 
 def print_cache_statistics(api_url: str) -> float:

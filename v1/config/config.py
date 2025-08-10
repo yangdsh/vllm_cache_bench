@@ -41,6 +41,7 @@ class ExperimentConfiguration:
     
     # Advanced options
     cache_eviction_strategy: CacheEvictionStrategy = CacheEvictionStrategy.STANDARD
+    conversation_eviction_config: Optional[Dict[str, Any]] = None
     enable_mock_decoding: bool = False
     experiment_tag: Optional[str] = None
     
@@ -102,6 +103,11 @@ class ExperimentConfigurationBuilder:
                                     ) -> 'ExperimentConfigurationBuilder':
         """Set cache eviction strategy"""
         self._config_params['cache_eviction_strategy'] = strategy
+        return self
+    
+    def with_conversation_eviction_config(self, config: Optional[Dict[str, Any]]) -> 'ExperimentConfigurationBuilder':
+        """Set conversation eviction configuration"""
+        self._config_params['conversation_eviction_config'] = config
         return self
     
     def with_limits(self, max_prompts: int, time_limit: int) -> 'ExperimentConfigurationBuilder':
