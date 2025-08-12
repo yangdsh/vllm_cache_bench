@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 '''
 cd ~/PrefixCacheInternProject/vllm_cache_bench/v1
-python cache_replay.py --mode client --log-file experiment_logs/qwen-8b_2025-08-07/client_64.0gb_0.9rps_29_5am_6am.log > replay_client.log 2>&1
-python cache_replay.py --mode server --log-file experiment_logs/qwen-8b_2025-08-08/server_64.0gb_0.9rps_29_5am_6am.log > replay_server.log 2>&1
+python cache_replay.py --mode client --log-file * > replay_client.log 2>&1
+python cache_replay.py --mode server --log-file * --eviction-algorithm conversation_aware> replay_server.log 2>&1
 '''
 
 """
 Unified Log Replay LMCache Integration - Parses client or server logs and generates LMCache operations.
 
-This script reads log files, extracts events, and generates corresponding LMCache lookup, retrieve, and store operations.
-Use --mode client or --mode server to select the log type.
+This script reads log files, extracts events, and generates LMCache lookup, retrieve, and store.
 """
 
 import argparse
@@ -42,14 +41,14 @@ logger.propagate = False
 
 # Local imports
 from util.conversation_manager import ConversationManager
-from util.common import get_model_config_and_bytes_per_token, get_chat_template_overhead, LogParser, Event
+from util.common import get_bytes_per_token, get_chat_template_overhead, LogParser, Event
 from util.print_statistics import print_lmcache_statistics
 
 class LMCacheLogReplay:
     """Unified class for replaying client or server logs and generating LMCache operations"""
     def __init__(self, model_name: str, chunk_size: int = 256, device: str = None,
                  max_context_length: int = 16384, page_size: int = 16,
-                 cache_size: float = 10.0, eviction_algorithm: str = "lru", mode: str = "server",
+                 cache_size: float = 64.0, eviction_algorithm: str = "lru", mode: str = "server",
                  enable_timing_sync: bool = False):
         self.model_name = model_name
         self.cache_size = cache_size
@@ -67,19 +66,21 @@ class LMCacheLogReplay:
                          f"Supported algorithms: {supported_algorithms}. Using 'lru' instead.")
             eviction_algorithm = "lru"
         self.eviction_algorithm = eviction_algorithm
-        self.config, self.bytes_per_token = get_model_config_and_bytes_per_token(self.model_name)
+        self.config, self.bytes_per_token = get_bytes_per_token(self.model_name)
         
         # Calculate chat template overhead
         self.chat_template_overhead = get_chat_template_overhead(self.model_name)
-        logger.info(f"Chat template overhead for {self.model_name}: {self.chat_template_overhead} tokens")
+        logger.info(f"Chat template overhead {self.model_name}: {self.chat_template_overhead}")
         
         self.dtype = torch.bfloat16
         self.hidden_dim = self.config.hidden_size
         self.num_layers = self.config.num_hidden_layers
         self.num_attention_heads = self.config.num_attention_heads
-        self.num_key_value_heads = getattr(self.config, 'num_key_value_heads', self.num_attention_heads)
+        self.num_key_value_heads = getattr(
+            self.config, 'num_key_value_heads', self.num_attention_heads)
         self.head_dim = self.config.hidden_size // self.config.num_attention_heads
-        self.kv_shape = (self.num_layers, 2, self.page_size, self.num_key_value_heads, self.head_dim)
+        self.kv_shape = (
+            self.num_layers, 2, self.page_size, self.num_key_value_heads, self.head_dim)
         self.tokenizer = self._load_tokenizer()
         self.conversation_manager = ConversationManager(self.tokenizer)
         self.aborted_conversations: set[int] = set()
@@ -104,31 +105,8 @@ class LMCacheLogReplay:
         self.lookup_tokens_by_turns: Dict[int, int] = defaultdict(int)
         self.hit_tokens_by_turns: Dict[int, int] = defaultdict(int)
         
-        self._log_cache_size_info()
         self._initialize_lmcache()
-        logger.info(f"LMCacheLogReplay initialized with device: {self.device}, mode: {self.mode}, timing sync: {self.enable_timing_sync}")
-
-    def _log_cache_size_info(self):
-        bytes_per_element = 2
-        cache_size_per_layer_per_token = 2 * self.num_key_value_heads * self.head_dim * bytes_per_element
-        total_cache_size_per_token = cache_size_per_layer_per_token * self.num_layers
-        if self.bytes_per_token != total_cache_size_per_token:
-            logger.warning(f"Bytes per token ({self.bytes_per_token}) does not match"
-             f"total cache size per token ({total_cache_size_per_token})")
-            raise ValueError("Bytes per token does not match total cache size per token")
-        logger.info("="*60)
-        logger.info("KV CACHE SIZE ANALYSIS")
-        logger.info("="*60)
-        logger.info(f"Model: {self.model_name}")
-        logger.info(f"Data type: {self.dtype} ({bytes_per_element} bytes per element)")
-        logger.info(f"Architecture:")
-        logger.info(f"  - Layers: {self.num_layers}")
-        logger.info(f"  - Key-Value heads: {self.num_key_value_heads}")
-        logger.info(f"  - Head dimension: {self.head_dim}")
-        logger.info(f"Expected KV cache size per token:")
-        logger.info(f"  - Per layer: {cache_size_per_layer_per_token:,} bytes ({cache_size_per_layer_per_token/1024:.2f} KB)")
-        logger.info(f"  - Total (all layers): {total_cache_size_per_token:,} bytes ({total_cache_size_per_token/1024:.2f} KB)")
-        logger.info("="*60)
+        logger.info(f"device: {self.device}, mode: {self.mode}, sync: {self.enable_timing_sync}")
 
     def _load_tokenizer(self):
         try:
@@ -165,7 +143,7 @@ class LMCacheLogReplay:
             extra_config["use_conversation_eviction"] = True
             logger.info("Using conversation-aware eviction policy")
         else:
-            logger.warning(f"Eviction algorithm '{self.eviction_algorithm}' not supported, using LRU")
+            logger.warning(f"Eviction alg '{self.eviction_algorithm}' not supported, using LRU")
             logger.info("Using LRU eviction policy")
         logger.info(f"Eviction algorithm requested: {self.eviction_algorithm}")
         logger.info(f"Extra config: {extra_config}")
@@ -203,8 +181,8 @@ class LMCacheLogReplay:
             logger.info(f"  - Tensor shape per layer: {tensor_shape}")
             logger.info(f"  - Metadata kv_shape: {self.kv_shape}")
             logger.info(f"  - Elements per layer: {total_elements:,}")
-            logger.info(f"  - Bytes per layer: {total_bytes_per_layer:,} ({total_bytes_per_layer/1024:.2f} KB)")
-            logger.info(f"  - Total bytes all layers: {total_bytes_all_layers:,} ({total_bytes_all_layers/(1024*1024):.2f} MB)")
+            logger.info(f"  - Bytes per layer: {total_bytes_per_layer/1024:.2f} KB")
+            logger.info(f"  - Total bytes all layers: {total_bytes_all_layers/(1024*1024):.2f} MB")
             logger.info(f"  - Effective tokens cached: {num_tokens}")
         return fresh_kv_cache
 
@@ -223,7 +201,8 @@ class LMCacheLogReplay:
         return torch.tensor(slot_mapping, dtype=torch.long, device=self.device)
 
     def handle_send_event(self, event: Event):
-        logger.info(f"Processing Send event: conv_id={event.conversation_id}, turn_number={event.turn_number}, input_tokens={event.input_tokens}")
+        logger.info(f"Processing Send event: conv_id={event.conversation_id}, "
+                    f"turn_number={event.turn_number}, input_tokens={event.input_tokens}")
         
         # Update conversation turn state
         self.conversation_turns[event.conversation_id] = max(
@@ -238,7 +217,8 @@ class LMCacheLogReplay:
             prompt_len = event.input_tokens
         else:
             event.input_tokens -= self.chat_template_overhead
-            prompt_len = event.input_tokens - self.conversation_manager.get_token_count(event.conversation_id)
+            context_len = self.conversation_manager.get_token_count(event.conversation_id)
+            prompt_len = event.input_tokens - context_len
         prompt_text = self.conversation_manager.generate_prompt(prompt_len, event.conversation_id)
         self.conversation_manager.add_user_message(event.conversation_id, prompt_text, prompt_len)
         messages = self.conversation_manager.get_all_messages(event.conversation_id)
@@ -246,7 +226,7 @@ class LMCacheLogReplay:
         tokens = torch.tensor(tokens, dtype=torch.long, device=self.device)
         total_length = len(tokens) + event.generated_tokens
         if total_length > self.max_context_length:
-            logger.warning(f"⚠️  ABORTING REQUEST: Total length ({total_length}) exceeds {self.max_context_length} tokens. input_tokens={event.input_tokens}, generated_tokens={event.generated_tokens}")
+            logger.warning(f"⚠️  ABORTING REQUEST: Total length is {total_length}.")
             self.aborted_requests += 1
             self.length_violations.append({
                 "conversation_id": event.conversation_id,
@@ -267,7 +247,8 @@ class LMCacheLogReplay:
         self.total_lookup_time += lookup_time
         self.lookup_count += 1
         hit_rate = cached_tokens / len(tokens) if len(tokens) > 0 else 0
-        logger.info(f"  Lookup: {cached_tokens}/{len(tokens)} tokens cached ({hit_rate:.1%} hit rate, {lookup_time:.4f}s)")
+        logger.info(f"  Lookup: {cached_tokens}/{len(tokens)} tokens cached"
+                    f"({hit_rate:.1%} hit rate, {lookup_time:.4f}s)")
         self.total_tokens += event.input_tokens
         
         # Track hits by turn count
@@ -301,23 +282,7 @@ class LMCacheLogReplay:
         self.engine.lookup_unpin([event.request_id])
         self.processed_requests += 1
 
-    def handle_done_event(self, event: Event):
-        if event.conversation_id in self.aborted_conversations:
-            logger.warning(f"Skipping Done event for aborted conversation {event.conversation_id}")
-            return
-        generated_text = self.conversation_manager.generate_prompt(
-            event.generated_tokens, event.conversation_id
-        )
-        self.conversation_manager.add_gpt_message(event.conversation_id, generated_text, event.generated_tokens)
-        messages = self.conversation_manager.get_all_messages(event.conversation_id)
-        tokens = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True)
-        token_text = self.tokenizer.decode(tokens)
-        if '</think>' in token_text:
-            token_text = token_text.replace("<think>\n\n</think>\n\n", "")
-        tokens = self.tokenizer.encode(token_text)
-        tokens = torch.tensor(tokens, dtype=torch.long, device=self.device)
         slot_mapping = self._generate_slot_mapping(len(tokens))
-        logger.info(f"Processing Done event: conv_id={event.conversation_id}, generated_tokens={event.generated_tokens}, all_tokens={len(tokens)}")
         kv_caches = self._get_kv_cache_for_tokens(len(tokens))
         self.connector.kvcaches = kv_caches
         start_time = time.perf_counter()
@@ -328,8 +293,46 @@ class LMCacheLogReplay:
         })
         store_time = time.perf_counter() - start_time
         self.total_store_time += store_time
-        self.store_count += 1
+        # self.store_count += 1
         logger.info(f"  ✓ Stored {len(tokens)} tokens in {store_time:.4f}s")
+
+    def handle_done_event(self, event: Event):
+        if event.conversation_id in self.aborted_conversations:
+            logger.warning(f"Skipping Done event for aborted conversation {event.conversation_id}")
+            return
+        generated_text = self.conversation_manager.generate_prompt(
+            event.generated_tokens, event.conversation_id
+        )
+        self.conversation_manager.add_gpt_message(
+            event.conversation_id, generated_text, event.generated_tokens)
+        messages = self.conversation_manager.get_all_messages(event.conversation_id)
+        tokens = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True)
+        token_text = self.tokenizer.decode(tokens)
+        if '</think>' in token_text:
+            token_text = token_text.replace("<think>\n\n</think>\n\n", "")
+        tokens = self.tokenizer.encode(token_text)
+        tokens = torch.tensor(tokens, dtype=torch.long, device=self.device)
+
+        token_len = len(tokens)
+        logger.info(f"Processing Done event: conv_id={event.conversation_id}, "
+            f"generated_tokens={event.generated_tokens}, all_tokens={len(tokens)}")
+        aligned_token_len = (
+            token_len // self.chunk_size * self.chunk_size
+        )
+        aligned_tokens = tokens[:aligned_token_len]
+        slot_mapping = self._generate_slot_mapping(len(aligned_tokens))
+        kv_caches = self._get_kv_cache_for_tokens(len(aligned_tokens))
+        self.connector.kvcaches = kv_caches
+        start_time = time.perf_counter()
+        self.engine.store(aligned_tokens, **{
+            'kvcaches': kv_caches,
+            'slot_mapping': slot_mapping,
+            'request_id': event.request_id
+        })
+        store_time = time.perf_counter() - start_time
+        self.total_store_time += store_time
+        self.store_count += 1
+        logger.info(f"  ✓ Stored {len(aligned_tokens)} tokens in {store_time:.4f}s")
 
     def replay_log_events(self, events: List[Event]):
         if self.enable_timing_sync:
@@ -377,11 +380,8 @@ class LMCacheLogReplay:
                 # Format original timestamp for display
                 original_time_str = time.strftime('%H:%M:%S', time.localtime(event.timestamp))
                 
-                if wait_time > 0:
-                    logger.info(f"\n--- Event {i+1}/{len(sorted_events)} (original: {original_time_str}, waiting {wait_time:.3f}s) ---")
-                    time.sleep(wait_time)
-                else:
-                    logger.info(f"\n--- Event {i+1}/{len(sorted_events)} (original: {original_time_str}, delayed by {abs(wait_time):.3f}s) ---")
+                logger.info(f"\n--- Event {i+1}/{len(sorted_events)} (time: {original_time_str} ---")
+                time.sleep(wait_time)
             else:
                 logger.info(f"\n--- Event {i+1}/{len(sorted_events)} ---")
             
@@ -402,13 +402,7 @@ class LMCacheLogReplay:
                 last_event_time = event.timestamp if event.timestamp > 0 else last_event_time
         
         self.total_running_time = time.perf_counter() - start_time
-        if self.enable_timing_sync:
-            logger.info(f"\nCompleted replay of {len(sorted_events)} events with original timing")
-            if hasattr(self, '_original_duration') and self._original_duration > 0:
-                timing_accuracy = abs(self.total_running_time - self._original_duration) / self._original_duration * 100
-                logger.info(f"Timing accuracy: {timing_accuracy:.1f}% deviation from original")
-        else:
-            logger.info(f"\nCompleted replay of {len(sorted_events)} events (timing synchronization disabled)")
+        logger.info(f"Completed replay of {len(sorted_events)} events in {self.total_running_time:.2f}s")
 
     def print_statistics(self, api_url: str = None, verbose: bool = False):
         logger.info("\n" + "="*60)
@@ -438,9 +432,9 @@ class LMCacheLogReplay:
         
         logger.info(f"\nTiming Statistics:")
         logger.info(f"  Total running time: {self.total_running_time:.4f}s")
-        logger.info(f"  Total lookup time: {self.total_lookup_time:.4f}s ({self.lookup_count} operations)")
-        logger.info(f"  Total retrieve time: {self.total_retrieve_time:.4f}s ({self.retrieve_count} operations)")
-        logger.info(f"  Total store time: {self.total_store_time:.4f}s ({self.store_count} operations)")
+        logger.info(f"   lookup time: {self.total_lookup_time:.4f}s ({self.lookup_count})")
+        logger.info(f"   retrieve time: {self.total_retrieve_time:.4f}s ({self.retrieve_count})")
+        logger.info(f"   store time: {self.total_store_time:.4f}s ({self.store_count})")
         if self.lookup_count > 0:
             avg_lookup_time = self.total_lookup_time / self.lookup_count
             logger.info(f"  Average lookup time: {avg_lookup_time:.4f}s")
@@ -465,7 +459,7 @@ class LMCacheLogReplay:
             lookup_tokens = self.lookup_tokens_by_turns.get(turn_count, 0)
             hit_tokens = self.hit_tokens_by_turns.get(turn_count, 0)
             token_hit_ratio = hit_tokens / lookup_tokens if lookup_tokens > 0 else 0.0
-            logger.info(f"    {turn_count} turns: {token_hit_ratio:.2%} ({hit_tokens}/{lookup_tokens} tokens)")
+            logger.info(f"    {turn_count} turns: {token_hit_ratio:.2%} ({hit_tokens}/{lookup_tokens})")
         
         if self.mode == 'server':
             if self.requests_with_hits > 0:
@@ -492,25 +486,31 @@ class LMCacheLogReplay:
             logger.warning(f"Error during cleanup: {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description='Replay client or server logs and generate LMCache operations')
-    parser.add_argument('--mode', type=str, choices=['client', 'server'], default='server', help='Log type: client or server')
-    parser.add_argument('--log-file', required=True, help='Path to the log file')
-    parser.add_argument('--cache-size', type=float, default=64, help='LMCache cache size in GB')
-    parser.add_argument('--model', default='Qwen/Qwen3-8B-FP8', help='Model name for tokenizer and metadata')
-    parser.add_argument('--max-events', type=int, default=None, help='Maximum number of events to process')
-    parser.add_argument('--chunk-size', type=int, default=256, help='LMCache chunk size (default: 256)')
-    parser.add_argument('--max-context-length', type=int, default=16384, help='Maximum expected context length in tokens (default: 16384)')
-    parser.add_argument('--page-size', type=int, default=16, help='KV cache page size in tokens (default: 16)')
-    parser.add_argument('--api-url', type=str, default="http://localhost:9000/v1/chat/completions", help='API URL for fetching cache statistics (optional)')
-    parser.add_argument('--eviction-algorithm', type=str, default="lru", help='Eviction algorithm for LMCache (lru or conversation_aware)')
-    parser.add_argument('--timing-sync', action='store_true', 
-                       help='Enable timing synchronization. When enabled, events are replayed at the same timing as the original log.')
+    parser = argparse.ArgumentParser(description='Replay client or server logs')
+    parser.add_argument('--mode', type=str, choices=['client', 'server'], default='server')
+    parser.add_argument('--log-file', required=True)
+    parser.add_argument('--cache-size', type=float, default=64)
+    parser.add_argument('--max-events', type=int, default=None)
+    parser.add_argument('--chunk-size', type=int, default=256)
+    parser.add_argument('--max-context-length', type=int, default=16384)
+    parser.add_argument('--page-size', type=int, default=16)
+    parser.add_argument('--api-url', type=str, default="http://localhost:9000/v1/chat/completions")
+    parser.add_argument('--eviction-algorithm', type=str, default="lru")
+    parser.add_argument('--timing-sync', action='store_true')
     args = parser.parse_args()
+
+    if 'qwen-8b' in args.log_file:
+        model_name = 'Qwen/Qwen3-8B-FP8'
+    elif 'llama-8b' in args.log_file:
+        model_name = 'meta-llama/Llama-3.1-8B-Instruct'
+    else:
+        raise ValueError(f"Unknown model: {args.log_file}")
+
     print("LMCache Log Replay Tool")
     print("="*60)
     print(f"Log file: {args.log_file}")
     print(f"Mode: {args.mode}")
-    print(f"Model: {args.model}")
+    print(f"Model: {model_name}")
     print(f"Chunk size: {args.chunk_size}")
     print(f"Max context length: {args.max_context_length}")
     print(f"page size: {args.page_size}")
@@ -533,7 +533,7 @@ def main():
         events = events[:args.max_events]
         print(f"Limited to first {len(events)} events")
     replay = LMCacheLogReplay(
-        model_name=args.model,
+        model_name=model_name,
         chunk_size=args.chunk_size,
         max_context_length=args.max_context_length,
         page_size=args.page_size,

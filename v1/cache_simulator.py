@@ -38,7 +38,7 @@ logger.propagate = False
 
 
 from util.common import LogParser, Event
-from util.common import get_model_config_and_bytes_per_token, get_chat_template_overhead
+from util.common import get_bytes_per_token, get_chat_template_overhead
 
 @dataclass
 class ConversationFeature:
@@ -84,7 +84,6 @@ class CacheEntry:
     conversation_id: int
     turn_number: int
     token_count: int  # Total tokens stored
-    complete_blocks_count: int  # Number of complete blocks (for lookup)
     size: int
     access_timestamp: float
     feature: Optional[ConversationFeature] = None
@@ -93,6 +92,7 @@ class CacheEntry:
     last_access: float = 0.0
     creation_time: float = 0.0
     eviction_time: Optional[float] = None
+    is_last_prefill: bool = False
 
 @dataclass
 class ConversationAnalysis:
@@ -218,7 +218,7 @@ class CacheSimulator:
     
     def __init__(self, config: SimulatorConfig):
         self.config = config
-        self.cache_size_bytes = config.cache_size_gb * 1024 * 1024 * 1024
+        self.cache_size_bytes = config.cache_size_gb * 1024 * 1024 * 1024 * 0.95
         self.current_cache_size = 0
         
         # Cache storage: key -> CacheEntry
@@ -249,7 +249,7 @@ class CacheSimulator:
         
         # Reuse interval analysis
         self.reuse_intervals: Dict[int, List[float]] = defaultdict(list)  # turn_count -> intervals
-        self.last_access_times: Dict[str, float] = {}
+        self.last_access_times: Dict[int, float] = {}
         
         # Hit ratio by turn count
         self.hits_by_turns: Dict[int, int] = defaultdict(int)
@@ -276,7 +276,7 @@ class CacheSimulator:
         """Generate a cache key for a conversation turn"""
         return f"conv_{conversation_id}_turn_{turn_number}"
     
-    def _get_complete_blocks(self, token_count: int) -> int:
+    def _get_aligned_token_count(self, token_count: int) -> int:
         """Get the number of tokens that form complete blocks"""
         block_size = self.config.block_size
         complete_blocks = token_count // block_size
@@ -297,7 +297,8 @@ class CacheSimulator:
         )
     
     def _update_conversation_analysis(self, conversation_id: int, turn_number: int, 
-                                    token_count: int, current_time: float, is_hit: bool):
+                                    token_count: int, current_time: float, 
+                                    is_hit: bool, reuse_interval: float = 0.0):
         """Update conversation analysis data"""
         analysis = self.conversation_analysis[conversation_id]
         analysis.conversation_id = conversation_id
@@ -315,6 +316,10 @@ class CacheSimulator:
             analysis.cache_misses += 1
         
         analysis.turn_lengths.append(token_count)
+        
+        # Store reuse interval if it's meaningful (greater than 0)
+        if reuse_interval > 0:
+            analysis.reuse_intervals.append(reuse_interval)
     
     def _evict_if_needed(self, required_size: int):
         """Evict entries if cache is full"""
@@ -365,86 +370,88 @@ class CacheSimulator:
         lookup_turn_number = max(1, turn_number - 1)
         cache_key = self._generate_cache_key(conversation_id, lookup_turn_number)
         
+        # Calculate reuse interval if this is a repeat access to the same conversation
+        reuse_interval = 0.0
+        if conversation_id in self.last_access_times:
+            reuse_interval = current_time - self.last_access_times[conversation_id]
+            # Store reuse interval for analysis
+            self.reuse_intervals[turn_count].append(reuse_interval)
+            logger.debug(f"  Reuse interval {conversation_id}: {reuse_interval:.2f}s")
+        
+        # Create conversation feature
+        feature = self._create_conversation_feature(conversation_id,
+            turn_number, current_time, reuse_interval)
+        self.conversation_features[conversation_id] = feature
+        
+        # Update last access time for this conversation
+        self.last_access_times[conversation_id] = current_time
+        
         # Check for cache hit
         if cache_key in self.cache:
-            # Cache hit
-            self.cache_hits += 1
             # Use complete blocks count for hit token calculation
             entry = self.cache[cache_key]
-            hit_token_count = entry.complete_blocks_count
-            self.hit_tokens += hit_token_count
-            self.hit_tokens_by_turns[turn_count] += hit_token_count
-            
-            # Log if hit tokens were limited by complete blocks
-            if hit_token_count < entry.token_count:
-                logger.debug(f"Hit tokens limited from {entry.token_count} to {hit_token_count} "
-                            f"(block_size={self.config.block_size})")
-            
-            self.hits_by_turns[turn_count] += 1
-            
-            # Update last access time for reuse interval analysis
-            if cache_key in self.last_access_times:
-                interval = current_time - self.last_access_times[cache_key]
-                self.reuse_intervals[turn_count].append(interval)
-                
-                # Update conversation analysis
-                analysis = self.conversation_analysis[conversation_id]
-                analysis.reuse_intervals.append(interval)
-            
-            self.last_access_times[cache_key] = current_time
-            
-            # remove the entry in eviction policy
-            # This is because the following store will add the entry back with the new size
-            # entry = self.cache[cache_key]
-            # self.eviction_policy.remove(cache_key, entry)
-            # self.current_cache_size -= entry.size
-            
-            # Update conversation analysis
-            self._update_conversation_analysis(conversation_id, turn_number, token_count, current_time, True)
-            
-            return True, hit_token_count
-        else:
-            # Cache miss
-            self.cache_misses += 1
-            
-            # Update conversation analysis
-            self._update_conversation_analysis(conversation_id, turn_number, token_count, current_time, False)
-            
-            return False, 0
+            hit_token_count = entry.token_count
+            if hit_token_count > 0:
+                self.cache_hits += 1
+                self.hit_tokens += hit_token_count
+                self.hits_by_turns[turn_count] += 1
+                self.hit_tokens_by_turns[turn_count] += hit_token_count
+                # Update conversation analysis with reuse interval
+                self._update_conversation_analysis(conversation_id, turn_number, token_count, 
+                    current_time, True, reuse_interval)
+                return True, hit_token_count
+        
+        # Cache miss or hit tokens is 0
+        self.cache_misses += 1
+        self._update_conversation_analysis(conversation_id, turn_number, token_count, 
+                current_time, False, reuse_interval)
+        return False, 0
     
     def store(self, conversation_id: int, turn_number: int, token_count: int, 
-              current_time: float, previous_interval: float):
+              current_time: float, feature: ConversationFeature, is_last_prefill: bool):
         """Simulate storing an entry in the cache"""
-        cache_key = self._generate_cache_key(conversation_id, turn_number)
+        if token_count == 0:
+            return
         
         # Calculate entry size based on complete blocks (for cache management)
         entry_size_bytes = self._calculate_entry_size(token_count)
         
+        # evict the previous cache key if it exists
+        if not is_last_prefill:
+            lookup_turn_number = max(1, turn_number - 1)
+            prev_cache_key = self._generate_cache_key(conversation_id, lookup_turn_number)
+            if prev_cache_key in self.cache:
+                prev_entry = self.cache[prev_cache_key]
+                self.eviction_policy.remove(prev_cache_key, prev_entry)
+                self.current_cache_size -= prev_entry.size
+                del self.cache[prev_cache_key]
+                # logger.debug(f"Evicting before updating {prev_cache_key}")
+            current_cache_key = self._generate_cache_key(conversation_id, turn_number)
+            if current_cache_key in self.cache:
+                current_entry = self.cache[current_cache_key]
+                self.eviction_policy.remove(current_cache_key, current_entry)
+                self.current_cache_size -= current_entry.size
+                del self.cache[current_cache_key]
+        
         # Evict if needed
         self._evict_if_needed(entry_size_bytes)
-        
-        # Create conversation feature
-        feature = self._create_conversation_feature(conversation_id,
-            turn_number, current_time, previous_interval)
         
         # Create cache entry with total tokens but size based on complete blocks
         entry = CacheEntry(
             conversation_id=conversation_id,
             turn_number=turn_number,
-            token_count=token_count,  # Store total tokens
-            complete_blocks_count=self._get_complete_blocks(token_count),  # for lookup
+            token_count=token_count,  # Stored tokens
             access_timestamp=current_time,
             size=entry_size_bytes,
             feature=feature,
-            creation_time=current_time
+            creation_time=current_time,
+            is_last_prefill=is_last_prefill
         )
-
-        if cache_key in self.cache:
-            prev_entry = self.cache[cache_key]
-            self.eviction_policy.remove(cache_key, prev_entry)
-            self.current_cache_size -= prev_entry.size
         
         # Store in cache
+        cache_key = self._generate_cache_key(conversation_id, turn_number)
+        if is_last_prefill:
+            cache_key += "_last_prefill"
         self.cache[cache_key] = entry
         self.current_cache_size += entry_size_bytes
         
@@ -573,8 +580,8 @@ class CacheSimulatorReplay:
     
     def handle_send_event(self, event: Event):        
         """Handle Send event - perform lookup simulation"""
-        logger.info(f"Processing Send event: conv_id={event.conversation_id}, "
-                   f"turn_number={event.turn_number}, input_tokens={event.input_tokens}")
+        logger.info(f"Send: conv_{event.conversation_id}_{event.turn_number}"
+                   f" all_tokens={event.input_tokens}")
         
         # Update conversation turn state
         self.conversation_turn_state[event.conversation_id] = event.turn_number
@@ -595,8 +602,6 @@ class CacheSimulatorReplay:
         # Update last timestamp for this conversation
         self.conversation_last_timestamps[event.conversation_id] = current_timestamp
         
-        logger.info(f"  Cumulative tokens for conversation {event.conversation_id}: {token_count} (added {event.input_tokens})")
-        
         # Simulate cache lookup with event and interval
         hit, hit_tokens = self.simulator.lookup(
             event.conversation_id, 
@@ -606,9 +611,26 @@ class CacheSimulatorReplay:
         )
         
         if hit:
-            logger.info(f"  ✓ Cache HIT for conversation {event.conversation_id}, turn {event.turn_number} (hit tokens: {hit_tokens})")
+            logger.info(f"  ✓ Cache HIT (hit tokens: {hit_tokens})")
         else:
-            logger.info(f"  ✗ Cache MISS for conversation {event.conversation_id}, turn {event.turn_number}")
+            logger.info(f"  ✗ Cache MISS")
+        
+        self.simulator.store(
+            event.conversation_id,
+            event.turn_number,
+            self.simulator._get_aligned_token_count(token_count),  # aligned tokens
+            current_timestamp,
+            self.simulator.conversation_features[event.conversation_id],
+            is_last_prefill=False
+        )
+        self.simulator.store(
+            event.conversation_id,
+            event.turn_number,
+            token_count - self.simulator._get_aligned_token_count(token_count), # tail
+            current_timestamp,
+            self.simulator.conversation_features[event.conversation_id],
+            is_last_prefill=True
+        )
         
         self.processed_requests += 1
     
@@ -631,20 +653,21 @@ class CacheSimulatorReplay:
         
         token_count = input_tokens + output_tokens
         
-        logger.info(f"  Cumulative tokens for conversation {event.conversation_id}: {token_count} (added {output_tokens})")
+        logger.info(f"Done: conv_{event.conversation_id}_{current_turn_number}"
+                   f" all_tokens={token_count}")
         
         # Simulate cache store with event
         current_timestamp = event.timestamp if event.timestamp > 0 else time.time()
         self.simulator.store(
             event.conversation_id,
-            current_turn_number,  # Use the tracked turn_number
-            token_count,  # Pass cumulative token count
+            current_turn_number,
+            self.simulator._get_aligned_token_count(token_count),  # cumulative token count
             current_timestamp,
-            0.0  # No interval for store operations
+            self.simulator.conversation_features[event.conversation_id],
+            is_last_prefill=False
         )
         
-        logger.info(f"  ✓ Stored conversation {event.conversation_id} in cache (turn {current_turn_number}, "
-                   f"tokens: {token_count}, input: {input_tokens}, output: {output_tokens})")
+        logger.info(f"  ✓ input: {input_tokens}, output: {output_tokens})")
     
     def replay_log_events(self, events: List[Event]):
         """Replay all log events and simulate cache operations"""
@@ -781,12 +804,16 @@ def main():
                        help='Block size for cache entries (default: 256)')
     parser.add_argument('--max-context-length', type=int, default=16384,
                        help='Maximum context length in tokens (default: 16384)')
-    parser.add_argument('--model-name', default='Qwen/Qwen3-8B-FP8')
     
     args = parser.parse_args()
     # Create configuration
-    model_name = args.model_name
-    _, bytes_per_token = get_model_config_and_bytes_per_token(model_name)
+    if 'qwen-8b' in args.log_file:
+        model_name = 'Qwen/Qwen3-8B-FP8'
+    elif 'llama-8b' in args.log_file:
+        model_name = 'meta-llama/Llama-3.1-8B-Instruct'
+    else:
+        raise ValueError(f"Unknown model: {args.log_file}")
+    _, bytes_per_token = get_bytes_per_token(model_name)
     chat_template_overhead = get_chat_template_overhead(model_name)
     print(f"Bytes per token: {bytes_per_token}")
     print(f"Chat template overhead: {chat_template_overhead} tokens")

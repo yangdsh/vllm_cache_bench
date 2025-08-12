@@ -44,6 +44,7 @@ class EnvironmentProvider:
             shell_command_prefix=(
                 "LMCACHE_CHUNK_SIZE=256 "
                 "LMCACHE_LOCAL_CPU=True "
+                "LMCACHE_SAVE_DECODE_CACHE=true "
             ),
             server_ready_pattern=r"Starting vLLM API server"
         )

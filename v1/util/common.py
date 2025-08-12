@@ -44,9 +44,9 @@ class LogParser:
     def _parse_server_log(self) -> List[Event]:
         """Parse server log file and return Event objects ordered to match client event order"""
         observability_pattern = re.compile(
-            r'\[Observability\] on_lookup: conversation_id=(\d+), turn_number=(\d+), '
+            r'\[Observability\] on_lookup: conv_(\d+)_(\d+), '
             r'num_tokens=(\d+), hit_tokens=(\d+), accumulated_hit_tokens=(\d+), '
-            r'request_id=([a-zA-Z0-9-]+)'
+            r'lookup_id=([a-zA-Z0-9-]+)'
         )
         
         # First, get client events to understand the correct order
@@ -69,7 +69,7 @@ class LogParser:
                     turn_number = int(obs_match.group(2))
                     num_tokens_tokenized = int(obs_match.group(3))
                     hit_tokens = int(obs_match.group(4))
-                    request_id = obs_match.group(6)
+                    request_id = obs_match.group(6)  # This is lookup_id
                     
                     key = (conversation_id, turn_number)
                     server_data[key] = {
@@ -222,7 +222,7 @@ def parse_timestamp_from_log_line(line: str) -> float:
         print(f"Warning: Failed to parse timestamp from line: {line}")
         return 0.0
 
-def get_model_config_and_bytes_per_token(model_name: str) -> tuple:
+def get_bytes_per_token(model_name: str) -> tuple:
     """
     Load model config and compute bytes per token for KV cache, matching benchmark_replay.py logic.
     Returns (config, bytes_per_token)

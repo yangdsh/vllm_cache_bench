@@ -530,7 +530,7 @@ async def async_request_openai_chat_completions(
         while cur_turn_id != request_func_input.turn_id - 1:
             await asyncio.sleep(3)
             cur_turn_id = conversation_manager.get_conversation_messages_count(request_func_input.conversation_id) // 2
-            logger.info(f"waiting conv_id: {request_func_input.conversation_id}, "
+            logger.debug(f"waiting conv_id: {request_func_input.conversation_id}, "
               f"turn_id: {request_func_input.turn_id}, "
               f"cur_turn_id: {cur_turn_id}, "
               f"waiting_time: {waiting_time}, "
