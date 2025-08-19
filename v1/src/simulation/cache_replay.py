@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
-'''
-cd ~/PrefixCacheInternProject/vllm_cache_bench/v1
-python cache_replay.py --mode client --log-file * > replay_client.log 2>&1
-python cache_replay.py --mode server --log-file * --eviction-algorithm conversation_aware> replay_server.log 2>&1
-'''
-
 """
-Unified Log Replay LMCache Integration - Parses client or server logs and generates LMCache operations.
+Parses client or server logs and generates LMCache operations.
 
 This script reads log files, extracts events, and generates LMCache lookup, retrieve, and store.
 """
 
 import argparse
 import os
+import sys
 import time
 from typing import List, Dict, Any
 import torch
@@ -25,6 +20,9 @@ from lmcache.v1.cache_engine import LMCacheEngineBuilder
 from lmcache.v1.config import LMCacheEngineConfig  
 from lmcache.v1.gpu_connector import VLLMPagedMemGPUConnectorV2
 import logging
+
+# Add the src directory to the Python path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG)
@@ -40,15 +38,15 @@ logger.addHandler(handler)
 logger.propagate = False
 
 # Local imports
-from util.conversation_manager import ConversationManager
-from util.common import get_bytes_per_token, get_chat_template_overhead, LogParser, Event
-from util.print_statistics import print_lmcache_statistics
+from utils.conversation_manager import ConversationManager
+from common import get_bytes_per_token, get_chat_template_overhead, LogParser, Event
+from utils.print_statistics import print_lmcache_statistics
 
 class LMCacheLogReplay:
     """Unified class for replaying client or server logs and generating LMCache operations"""
     def __init__(self, model_name: str, chunk_size: int = 256, device: str = None,
                  max_context_length: int = 16384, page_size: int = 16,
-                 cache_size: float = 64.0, eviction_algorithm: str = "lru", mode: str = "server",
+                 cache_size: float = 64.0, eviction_policy: str = "lru", mode: str = "server",
                  enable_timing_sync: bool = False):
         self.model_name = model_name
         self.cache_size = cache_size
@@ -60,12 +58,16 @@ class LMCacheLogReplay:
         self.device = 'cuda'
         self.max_context_length = max_context_length
         self.page_size = page_size
-        supported_algorithms = ["lru", "conversation_aware"]
-        if eviction_algorithm not in supported_algorithms:
-            logger.warning(f"Eviction algorithm '{eviction_algorithm}' is not supported. "
-                         f"Supported algorithms: {supported_algorithms}. Using 'lru' instead.")
-            eviction_algorithm = "lru"
-        self.eviction_algorithm = eviction_algorithm
+        # "conversation_aware" would require timing sync, which is disabled by default
+        supported_algorithms = ["lru"] #, "conversation_aware"
+        if eviction_policy not in supported_algorithms:
+            logger.warning(
+                f"Eviction policy '{eviction_policy}' is not supported. "
+                f"Supported: {supported_algorithms}. Using 'lru' instead."
+                "conversation_aware requires timing sync, which is disabled by default"
+            )
+            eviction_policy = "lru"
+        self.eviction_policy = eviction_policy
         self.config, self.bytes_per_token = get_bytes_per_token(self.model_name)
         
         # Calculate chat template overhead
@@ -137,15 +139,11 @@ class LMCacheLogReplay:
             self.model_name, 1, 0, "vllm", self.dtype, self.kv_shape
         )
         extra_config = {}
-        if self.eviction_algorithm == "lru":
+        if self.eviction_policy == "lru":
             logger.info("Using LRU eviction policy")
-        elif self.eviction_algorithm == "conversation_aware":
+        elif self.eviction_policy == "conversation_aware":
             extra_config["use_conversation_eviction"] = True
             logger.info("Using conversation-aware eviction policy")
-        else:
-            logger.warning(f"Eviction alg '{self.eviction_algorithm}' not supported, using LRU")
-            logger.info("Using LRU eviction policy")
-        logger.info(f"Eviction algorithm requested: {self.eviction_algorithm}")
         logger.info(f"Extra config: {extra_config}")
         self.config = LMCacheEngineConfig.from_defaults(
             chunk_size=self.chunk_size,
@@ -488,33 +486,33 @@ class LMCacheLogReplay:
 def main():
     parser = argparse.ArgumentParser(description='Replay client or server logs')
     parser.add_argument('--mode', type=str, choices=['client', 'server'], default='server')
-    parser.add_argument('--log-file', required=True)
+    parser.add_argument('--input-file', required=True)
     parser.add_argument('--cache-size', type=float, default=64)
     parser.add_argument('--max-events', type=int, default=None)
     parser.add_argument('--chunk-size', type=int, default=256)
     parser.add_argument('--max-context-length', type=int, default=16384)
     parser.add_argument('--page-size', type=int, default=16)
     parser.add_argument('--api-url', type=str, default="http://localhost:9000/v1/chat/completions")
-    parser.add_argument('--eviction-algorithm', type=str, default="lru")
+    parser.add_argument('--eviction-policy', type=str, default="lru")
     parser.add_argument('--timing-sync', action='store_true')
     args = parser.parse_args()
 
-    if 'qwen-8b' in args.log_file:
+    if 'qwen-8b' in args.input_file:
         model_name = 'Qwen/Qwen3-8B-FP8'
-    elif 'llama-8b' in args.log_file:
+    elif 'llama-8b' in args.input_file:
         model_name = 'meta-llama/Llama-3.1-8B-Instruct'
     else:
-        raise ValueError(f"Unknown model: {args.log_file}")
+        raise ValueError(f"Unknown model: {args.input_file}")
 
     print("LMCache Log Replay Tool")
     print("="*60)
-    print(f"Log file: {args.log_file}")
+    print(f"Log file: {args.input_file}")
     print(f"Mode: {args.mode}")
     print(f"Model: {model_name}")
     print(f"Chunk size: {args.chunk_size}")
     print(f"Max context length: {args.max_context_length}")
     print(f"page size: {args.page_size}")
-    print(f"Eviction algorithm: {args.eviction_algorithm}")
+    print(f"eviction policy: {args.eviction_policy}")
     print(f"Timing synchronization: {'Disabled' if not args.timing_sync else 'Enabled'}")
     if args.api_url:
         print(f"API URL: {args.api_url}")
@@ -524,7 +522,7 @@ def main():
         return
     else:
         print("INFO: Using GPU (CUDA) for all operations")
-    parser_obj = LogParser(args.log_file)
+    parser_obj = LogParser(args.input_file)
     events = parser_obj.parse_log_file(mode=args.mode)
     if not events:
         print("No events found in log file!")
@@ -539,7 +537,7 @@ def main():
         page_size=args.page_size,
         device=None,
         cache_size=args.cache_size,
-        eviction_algorithm=args.eviction_algorithm,
+        eviction_policy=args.eviction_policy,
         mode=args.mode,
         enable_timing_sync=args.timing_sync
     )

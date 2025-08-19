@@ -1,0 +1,3 @@
+@timestamp,ConversationId,CustomerQueryLength,GenerativeModelResponseLength
+2025-05-29 05:00:07.053,5b7991da-9e8d-4e3c-a54a-d32578f19594,27.0,300.0
+2025-05-29 05:00:10.053,5b7991da-9e8d-4e3c-a54a-d32578f19594,1.0,1.0

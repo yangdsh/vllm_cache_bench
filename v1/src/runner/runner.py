@@ -7,15 +7,50 @@ import asyncio
 import time
 import os
 import re
+import subprocess
+from datetime import datetime
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from config.config import ExperimentConfiguration, RuntimeExperimentContext
 from environment.environment_provider import EnvironmentProvider
 from config.command_builder import CommandFactory
 from .resource_manager import ExperimentResourceManager
-from .log_analyzer import LogAnalyzer
-from util.common import kill_server
+from .result_reader import LogAnalyzer
+
+
+def kill_server(host):
+    """Kill all processes using the GPUs on a host."""
+    try:
+        # Kill any vllm processes for the current user
+        user = os.environ.get('USER')
+        if user:
+            pkill_cmd = f"pkill -u {user} -f vllm"
+            subprocess.run(pkill_cmd, shell=True, check=True)
+            print(f"Killed vllm processes for user {user}")
+    except subprocess.CalledProcessError as e:
+        print(f"Skipping killing vllm processes for user {user}: {e}")
+    
+    try:
+        # Command to find and kill all processes running on NVIDIA GPUs.
+        # It first checks if nvidia-smi command exists.
+        # Then, it gets the PIDs of GPU processes.
+        # If any PIDs are found, it attempts to kill them with SIGKILL.
+        kill_cmd = (
+            "if command -v nvidia-smi &> /dev/null; then "
+            "pids=$(nvidia-smi --query-compute-apps=pid --format=csv,noheader); "
+            "if [ -n \"$pids\" ]; then "
+            "echo \"$pids\" | xargs -r kill -9; "
+            "fi; "
+            "fi"
+        )
+        subprocess.run(kill_cmd, shell=True, check=True)
+        print("Killed any processes using GPUs on the local machine.")
+        print("Waiting for 10 seconds to ensure all processes are killed...")
+        time.sleep(10)
+    except subprocess.CalledProcessError as e:
+        print(f"No processes to kill or an error occurred: {e}")
+        return
 
 
 @dataclass
@@ -341,6 +376,37 @@ class BatchExperimentRunner:
             all_results.extend(batch_results)
         
         kill_server('')
+        
+        # Call benchmark_plotter.py with the right tag
+        if all_results and configs:
+            # Extract tag from the first experiment configuration and add date
+            first_config = configs[0]
+            base_tag = first_config.experiment_tag or first_config.model_name
+            
+            # Generate tag with date in format: model_name_YYYY-MM-DD
+            current_date = datetime.now().strftime("%Y-%m-%d")
+            tag = f"{base_tag}_{current_date}"
+            
+            print(f"\n{'='*80}")
+            print(f"GENERATING PLOTS FOR TAG: {tag}")
+            print(f"{'='*80}")
+            
+            # Get the path to benchmark_plotter.py
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            plotter_script = os.path.join(script_dir, "..", "utils", "benchmark_plotter.py")
+            
+            # Run the benchmark plotter script
+            result = subprocess.run([
+                "python", plotter_script, "--tag", tag
+            ], capture_output=True, text=True, cwd=os.path.dirname(plotter_script))
+            
+            if result.returncode == 0:
+                print("Benchmark plots generated successfully")
+                if result.stdout:
+                    print(result.stdout)
+            else:
+                print(f"Error generating benchmark plots: {result.stderr}")
+        
         return all_results
 
 

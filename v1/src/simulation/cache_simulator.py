@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-'''
-cd ~/PrefixCacheInternProject/vllm_cache_bench/v1
-python cache_simulator.py --log-file experiment_logs/qwen-8b_2025-08-07/server_64.0gb_0.9rps_29_5am_6am.log > replay_sim.log 2>&1
-'''
-
 """
 Cache Simulator for LMCache Eviction Analysis
 
@@ -16,12 +11,17 @@ This script provides comprehensive analysis of cache behavior including:
 
 import argparse
 import time
+import sys
+import os
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Set, Any
 import math
 
 import logging
+
+# Add the src directory to the Python path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG)
@@ -37,16 +37,10 @@ logger.addHandler(handler)
 logger.propagate = False
 
 
-from util.common import LogParser, Event
-from util.common import get_bytes_per_token, get_chat_template_overhead
+from common import LogParser, Event, get_bytes_per_token, get_chat_template_overhead
+from conversation_tracker import ConversationTracker, ConversationFeature
 
-@dataclass
-class ConversationFeature:
-    """Simplified conversation feature for scoring"""
-    conversation_id: int
-    turn_number: int
-    access_timestamp: float
-    previous_interval: float = 0.0
+
 
 @dataclass
 class ConversationScoringConfig:
@@ -60,22 +54,47 @@ class ConversationScorer:
     
     def __init__(self, config: Optional[ConversationScoringConfig] = None):
         self.config = config or ConversationScoringConfig()
+        self.current_time = 0.0
+        
+    def set_current_time(self, current_time: float):
+        """Set the current simulation time"""
+        self.current_time = current_time
         
     def calculate_score(
         self, 
         feature: Optional[ConversationFeature],
-        obj_access_timestamp: Optional[float] = None
+        access_timestamp: Optional[float] = None
     ) -> float:
         """Calculate an eviction score for a cache entry based on conversation features."""
-        if feature is None:
+        if feature is None or access_timestamp is None:
             return 0.0
         
         # Simple scoring based on turn number and time
-        recency_score = math.exp(-(time.time() - obj_access_timestamp) / self.config.reference_recency) if obj_access_timestamp else 0.0
+        recency_score = math.exp(-(self.current_time - access_timestamp) / self.config.reference_recency)
         time_interval_score = math.exp(-feature.previous_interval / self.config.reference_time_interval)
         
-        # Combine scores
-        score = (time_interval_score * self.config.score_factor + 1) * recency_score
+        # Length-based scoring: prefer longer conversations (more tokens = higher value)
+        total_length = feature.request_len + feature.respond_len
+        length_score = min(total_length / 10000.0, 1.0)
+        
+        # Combine scores with length consideration
+        score = (time_interval_score * self.config.score_factor + length_score + 1) * recency_score
+        
+        # Debug logging for first few calculations
+        if hasattr(self, '_debug_count'):
+            self._debug_count += 1
+        else:
+            self._debug_count = 1
+            
+        if self._debug_count <= 5:
+            logger.info(f"Score calculation {self._debug_count}: "
+                       f"current_time={self.current_time:.2f}, "
+                       f"access_time={access_timestamp:.2f}, "
+                       f"recency_score={recency_score:.4f}, "
+                       f"interval_score={time_interval_score:.4f}, "
+                       f"length_score={length_score:.4f} (req={feature.request_len}, resp={feature.respond_len}), "
+                       f"final_score={score:.4f}")
+        
         return score
 
 @dataclass
@@ -89,7 +108,6 @@ class CacheEntry:
     feature: Optional[ConversationFeature] = None
     score: float = 0.0
     hit_count: int = 0
-    last_access: float = 0.0
     creation_time: float = 0.0
     eviction_time: Optional[float] = None
     is_last_prefill: bool = False
@@ -159,8 +177,10 @@ class ConversationAwareEvictionPolicy:
                  score_update_interval: float = 10.0):
         self.scorer = ConversationScorer(scoring_config)
         self.score_update_interval = score_update_interval
-        self.last_score_update = time.time()
+        self.current_time = 0
+        self._last_score_update = 0
         self.total_size = 0
+        self.start_time = None  # Track the start time for relative timestamps
         
         # Key data storage: key -> entry data
         self.key_data: Dict[str, Dict] = {}
@@ -170,13 +190,18 @@ class ConversationAwareEvictionPolicy:
     
     def add(self, key: str, entry: CacheEntry):
         """Add a key with calculated score"""
-        current_time = time.time()
-        score = self.scorer.calculate_score(entry.feature, entry.access_timestamp)
+        # Set start time if not set
+        if self.start_time is None:
+            self.start_time = entry.access_timestamp
+        
+        self.current_time = entry.access_timestamp - self.start_time
+        self.scorer.set_current_time(self.current_time)
+        score = self.scorer.calculate_score(entry.feature, self.current_time)
         
         self.key_data[key] = {
             "entry": entry,
             "score": score,
-            "last_score_update": current_time
+            "last_score_update": self.current_time
         }
         self.total_size += entry.size
         # Insert into sorted list
@@ -184,6 +209,10 @@ class ConversationAwareEvictionPolicy:
     
     def get_evict_candidate(self) -> Optional[str]:
         """Get the key with lowest score"""
+        if self.current_time - self._last_score_update > self.score_update_interval:
+            self._update_all_scores()
+            self._last_score_update = self.current_time
+        
         if self.sorted_scores:
             return self.sorted_scores[0][1]
         return None
@@ -213,6 +242,36 @@ class ConversationAwareEvictionPolicy:
         except (ValueError, IndexError):
             pass
 
+    def _update_all_scores(self):
+        """Update all scores based on current time."""
+        current_time = self.current_time
+        
+        # Create a new sorted list
+        new_sorted_scores = []
+
+        self.scorer.set_current_time(current_time)
+        
+        # Recalculate all scores and build new sorted list
+        for key, data in self.key_data.items():
+            entry = data["entry"]
+            
+            # Calculate updated score using relative access timestamp
+            relative_access_time = entry.access_timestamp - self.start_time
+            new_score = self.scorer.calculate_score(entry.feature, relative_access_time)
+            
+            # Update stored score
+            data["score"] = new_score
+            data["last_score_update"] = current_time
+            
+            # Insert into new sorted list
+            import bisect
+            insert_pos = bisect.bisect_left(new_sorted_scores, (new_score, key))
+            new_sorted_scores.insert(insert_pos, (new_score, key))
+        
+        # Replace the old sorted list with the new one
+        self.sorted_scores = new_sorted_scores
+        self._last_score_update = current_time
+
 class CacheSimulator:
     """Cache simulator with detailed analysis capabilities"""
     
@@ -239,17 +298,12 @@ class CacheSimulator:
         self.evictions = 0
         
         # Conversation tracking
-        self.conversation_turns: Dict[int, int] = defaultdict(int)
-        self.conversation_features: Dict[int, ConversationFeature] = {}
+        self.conversation_tracker = ConversationTracker()
         
         # Analysis data
         self.conversation_analysis: Dict[int, ConversationAnalysis] = defaultdict(
             lambda: ConversationAnalysis(0)
         )
-        
-        # Reuse interval analysis
-        self.reuse_intervals: Dict[int, List[float]] = defaultdict(list)  # turn_count -> intervals
-        self.last_access_times: Dict[int, float] = {}
         
         # Hit ratio by turn count
         self.hits_by_turns: Dict[int, int] = defaultdict(int)
@@ -286,15 +340,6 @@ class CacheSimulator:
         """Calculate the size of a cache entry in bytes, only counting complete blocks"""
         return token_count * self.config.bytes_per_token
     
-    def _create_conversation_feature(self, conversation_id: int, turn_number: int, 
-                                   current_time: float, previous_interval: float = 0.0) -> ConversationFeature:
-        """Create a conversation feature for scoring using actual interval from event"""
-        return ConversationFeature(
-            conversation_id=conversation_id,
-            turn_number=turn_number,
-            access_timestamp=current_time,
-            previous_interval=previous_interval
-        )
     
     def _update_conversation_analysis(self, conversation_id: int, turn_number: int, 
                                     token_count: int, current_time: float, 
@@ -346,7 +391,7 @@ class CacheSimulator:
                          f"remaining: {self.current_cache_size}")
     
     def lookup(self, conversation_id: int, turn_number: int, token_count: int, 
-               current_time: float) -> Tuple[bool, int]:
+               current_time: float, request_len: int = 0) -> Tuple[bool, int]:
         """
         Simulate a cache lookup operation.
         
@@ -357,12 +402,11 @@ class CacheSimulator:
         self.lookup_tokens += token_count
         
         # Update conversation turn count
-        self.conversation_turns[conversation_id] = max(
-            self.conversation_turns[conversation_id], turn_number
-        )
+        # Update conversation turn tracking
+        self.conversation_tracker.update_turn_number(conversation_id, turn_number)
         
         # Track requests by turn count
-        turn_count = self.conversation_turns[conversation_id]
+        turn_count = self.conversation_tracker.get_turn_number(conversation_id)
         self.requests_by_turns[turn_count] += 1
         self.lookup_tokens_by_turns[turn_count] += token_count
         
@@ -371,22 +415,14 @@ class CacheSimulator:
         cache_key = self._generate_cache_key(conversation_id, lookup_turn_number)
         
         # Calculate reuse interval if this is a repeat access to the same conversation
-        reuse_interval = 0.0
-        if conversation_id in self.last_access_times:
-            reuse_interval = current_time - self.last_access_times[conversation_id]
-            # Store reuse interval for analysis
-            self.reuse_intervals[turn_count].append(reuse_interval)
+        reuse_interval = self.conversation_tracker.calculate_interval(conversation_id, current_time)
+        if reuse_interval > 0:
             logger.debug(f"  Reuse interval {conversation_id}: {reuse_interval:.2f}s")
         
-        # Create conversation feature
-        feature = self._create_conversation_feature(conversation_id,
-            turn_number, current_time, reuse_interval)
-        self.conversation_features[conversation_id] = feature
-        
-        # Update last access time for this conversation
-        self.last_access_times[conversation_id] = current_time
-        
         # Check for cache hit
+        hit = False
+        hit_tokens = 0
+        
         if cache_key in self.cache:
             # Use complete blocks count for hit token calculation
             entry = self.cache[cache_key]
@@ -399,13 +435,24 @@ class CacheSimulator:
                 # Update conversation analysis with reuse interval
                 self._update_conversation_analysis(conversation_id, turn_number, token_count, 
                     current_time, True, reuse_interval)
-                return True, hit_token_count
+                hit = True
+                hit_tokens = hit_token_count
+        else:
+            # Cache miss or hit tokens is 0
+            self.cache_misses += 1
+            self._update_conversation_analysis(conversation_id, turn_number, token_count, 
+                    current_time, False, reuse_interval)
         
-        # Cache miss or hit tokens is 0
-        self.cache_misses += 1
-        self._update_conversation_analysis(conversation_id, turn_number, token_count, 
-                current_time, False, reuse_interval)
-        return False, 0
+        # Log the result
+        if turn_number > 1:
+            if hit:
+                logger.info(f"  ✓ Cache HIT (hit tokens: {hit_tokens})")
+            else:
+                logger.info(f"  ✗ Cache MISS")
+            feature = self.conversation_tracker.get_conversation_feature(conversation_id, turn_number, current_time, reuse_interval, request_len)
+            logger.info(feature)
+        
+        return hit, hit_tokens
     
     def store(self, conversation_id: int, turn_number: int, token_count: int, 
               current_time: float, feature: ConversationFeature, is_last_prefill: bool):
@@ -471,8 +518,11 @@ class CacheSimulator:
             token_hit_ratio = hit_tokens / lookup_tokens if lookup_tokens > 0 else 0.0
             
             # Calculate average reuse interval
-            intervals = self.reuse_intervals.get(turn_count, [])
-            avg_reuse_interval = sum(intervals) / len(intervals) if intervals else 0.0
+            avg_reuse_interval = 0.0
+            for conv_id, state in self.conversation_tracker.conversation_states.items():
+                if state.turn_number == turn_count and state.reuse_intervals:
+                    avg_reuse_interval = state.get_average_reuse_interval()
+                    break
             
             # Calculate eviction rate (simplified)
             eviction_rate = 0.0  # Would need more detailed tracking
@@ -484,6 +534,64 @@ class CacheSimulator:
                 "token_hit_ratio": token_hit_ratio
             }
     
+    def print_detailed_snapshot(self):
+        """Dump detailed cache information for debugging"""
+        logger.info("\n" + "="*80)
+        logger.info("CACHE DEBUG INFORMATION")
+        logger.info("="*80)
+        
+        # Dump current cache contents
+        logger.info(f"\nCurrent cache contents ({len(self.cache)} entries):")
+        logger.info(f"Cache size: {self.current_cache_size / (1024**3):.2f} GB")
+        logger.info(f"Max cache size: {self.cache_size_bytes / (1024**3):.2f} GB")
+        logger.info(f"Utilization: {(self.current_cache_size / self.cache_size_bytes) * 100:.1f}%")
+        
+        # Group entries by conversation
+        conv_entries = {}
+        for key, entry in self.cache.items():
+            conv_id = entry.conversation_id
+            if conv_id not in conv_entries:
+                conv_entries[conv_id] = []
+            conv_entries[conv_id].append((key, entry))
+        
+        logger.info(f"\nConversations in cache ({len(conv_entries)} conversations):")
+        for conv_id in sorted(conv_entries.keys()):
+            entries = conv_entries[conv_id]
+            total_tokens = sum(entry.token_count for _, entry in entries)
+            total_size = sum(entry.size for _, entry in entries)
+            logger.info(f"  Conversation {conv_id}: {len(entries)} entries, "
+                       f"{total_tokens} tokens, {total_size / (1024**2):.1f} MB")
+            
+            # Show individual entries
+            for key, entry in sorted(entries, key=lambda x: x[1].turn_number):
+                logger.info(f"    {key}: turn {entry.turn_number}, "
+                           f"{entry.token_count} tokens, "
+                           f"score: {entry.score:.4f}, "
+                           f"access: {entry.access_timestamp:.1f}")
+        
+        # Dump eviction policy information
+        if hasattr(self.eviction_policy, 'sorted_scores'):
+            logger.info(f"\nEviction policy sorted scores (top 20 lowest scores):")
+            for i, (score, key) in enumerate(self.eviction_policy.sorted_scores[:20]):
+                if key in self.cache:
+                    entry = self.cache[key]
+                    logger.info(f"  {i+1}. {key}: score={score:.4f}, "
+                               f"conv_{entry.conversation_id}_turn_{entry.turn_number}, "
+                               f"tokens={entry.token_count}")
+        
+        # Dump recent evictions
+        logger.info(f"\nRecent eviction statistics:")
+        logger.info(f"  Total evictions: {self.evictions}")
+        logger.info(f"  Evicted conversations: {len(self.evicted_conversations)}")
+        
+        # Show most evicted conversations
+        if self.evicted_conversations:
+            most_evicted = sorted(self.evicted_conversations.items(), 
+                                 key=lambda x: x[1], reverse=True)[:10]
+            logger.info(f"  Most evicted conversations:")
+            for conv_id, count in most_evicted:
+                logger.info(f"    Conversation {conv_id}: {count} evictions")
+
     def get_detailed_statistics(self) -> Dict[str, Any]:
         """Get comprehensive statistics with detailed analysis"""
         self._calculate_cache_efficiency_metrics()
@@ -506,9 +614,9 @@ class CacheSimulator:
         
         # Calculate average reuse intervals by turn count
         avg_reuse_intervals = {}
-        for turn_count, intervals in self.reuse_intervals.items():
-            if intervals:
-                avg_reuse_intervals[turn_count] = sum(intervals) / len(intervals)
+        for conv_id, state in self.conversation_tracker.conversation_states.items():
+            if state.reuse_intervals:
+                avg_reuse_intervals[state.turn_number] = state.get_average_reuse_interval()
         
         # Conversation pattern analysis
         conversation_stats = {}
@@ -555,6 +663,7 @@ class CacheSimulator:
             }
         }
 
+
 class CacheSimulatorReplay:
     """Main class for replaying logs and simulating cache behavior with detailed analysis"""
     
@@ -567,14 +676,7 @@ class CacheSimulatorReplay:
         self.aborted_requests = 0
         self.processed_requests = 0
         
-        # Track conversation state for proper turn_number mapping
-        self.conversation_turn_state: Dict[int, int] = defaultdict(int)
-        
-        # total input lengths including the most recent send
-        self.conversation_input_lengths: Dict[int, int] = {}
-        
-        # Track conversation timestamps for interval calculation
-        self.conversation_last_timestamps: Dict[int, float] = {}
+        # Conversation state management is handled by the simulator's conversation manager
         
         logger.info(f"CacheSimulatorReplay initialized with {config.eviction_policy} policy")
     
@@ -583,44 +685,36 @@ class CacheSimulatorReplay:
         logger.info(f"Send: conv_{event.conversation_id}_{event.turn_number}"
                    f" all_tokens={event.input_tokens}")
         
-        # Update conversation turn state
-        self.conversation_turn_state[event.conversation_id] = event.turn_number
-        
-        # Store input length for use in done event
-        self.conversation_input_lengths[event.conversation_id] = event.input_tokens
+        request_len = self.simulator.conversation_tracker.get_request_len(event.conversation_id, event.input_tokens)
+
+        # Update conversation turn state and input length
+        self.simulator.conversation_tracker.update_turn_number(event.conversation_id, event.turn_number)
+        self.simulator.conversation_tracker.update_input_length(event.conversation_id, event.input_tokens)
         token_count = event.input_tokens
         
         # Calculate interval from previous event for this conversation
         current_timestamp = event.timestamp if event.timestamp > 0 else time.time()
-        previous_interval = 0.0
-        if event.conversation_id in self.conversation_last_timestamps:
-            previous_interval = current_timestamp - self.conversation_last_timestamps[event.conversation_id]
-            logger.info(f"  Interval for conversation {event.conversation_id}: {previous_interval:.2f}s")
+        interval = self.simulator.conversation_tracker.calculate_interval(event.conversation_id, current_timestamp)
+        if interval > 0:
+            logger.info(f"  Interval for conversation {event.conversation_id}: {interval:.2f}s")
         else:
             logger.info(f"  First event for conversation {event.conversation_id}, no interval")
         
-        # Update last timestamp for this conversation
-        self.conversation_last_timestamps[event.conversation_id] = current_timestamp
-        
         # Simulate cache lookup with event and interval
-        hit, hit_tokens = self.simulator.lookup(
+        self.simulator.lookup(
             event.conversation_id, 
             event.turn_number, 
             token_count, 
-            current_timestamp
+            current_timestamp,
+            request_len
         )
-        
-        if hit:
-            logger.info(f"  ✓ Cache HIT (hit tokens: {hit_tokens})")
-        else:
-            logger.info(f"  ✗ Cache MISS")
         
         self.simulator.store(
             event.conversation_id,
             event.turn_number,
             self.simulator._get_aligned_token_count(token_count),  # aligned tokens
             current_timestamp,
-            self.simulator.conversation_features[event.conversation_id],
+            self.simulator.conversation_tracker.get_conversation_feature(event.conversation_id, event.turn_number, current_timestamp, interval, request_len),
             is_last_prefill=False
         )
         self.simulator.store(
@@ -628,7 +722,7 @@ class CacheSimulatorReplay:
             event.turn_number,
             token_count - self.simulator._get_aligned_token_count(token_count), # tail
             current_timestamp,
-            self.simulator.conversation_features[event.conversation_id],
+            self.simulator.conversation_tracker.get_conversation_feature(event.conversation_id, event.turn_number, current_timestamp, interval, request_len),
             is_last_prefill=True
         )
         
@@ -642,13 +736,13 @@ class CacheSimulatorReplay:
             return
         
         # Get the current turn_number for this conversation
-        current_turn_number = self.conversation_turn_state[event.conversation_id]
+        current_turn_number = self.simulator.conversation_tracker.get_turn_number(event.conversation_id)
         if current_turn_number == 0:
             # If no turn_number tracked, this is likely the first turn
             current_turn_number = 1
         
         # Get the input length from the corresponding send event
-        input_tokens = self.conversation_input_lengths.get(event.conversation_id, 0)
+        input_tokens = self.simulator.conversation_tracker.get_input_length(event.conversation_id)
         output_tokens = event.generated_tokens if event.generated_tokens else 0
         
         token_count = input_tokens + output_tokens
@@ -663,11 +757,11 @@ class CacheSimulatorReplay:
             current_turn_number,
             self.simulator._get_aligned_token_count(token_count),  # cumulative token count
             current_timestamp,
-            self.simulator.conversation_features[event.conversation_id],
+            self.simulator.conversation_tracker.get_conversation_feature(event.conversation_id, current_turn_number, current_timestamp, 0.0, 0),
             is_last_prefill=False
         )
         
-        logger.info(f"  ✓ input: {input_tokens}, output: {output_tokens})")
+        logger.info(f"  ✓ input: {input_tokens}, output: {output_tokens}")
     
     def replay_log_events(self, events: List[Event]):
         """Replay all log events and simulate cache operations"""
@@ -697,6 +791,9 @@ class CacheSimulatorReplay:
     
     def print_detailed_statistics(self):
         """Print comprehensive statistics with detailed analysis"""
+        # Dump cache debug information
+        # self.simulator.print_detailed_snapshot()
+
         stats = self.simulator.get_detailed_statistics()
         
         logger.info("\n" + "="*80)
@@ -789,12 +886,15 @@ class CacheSimulatorReplay:
 def main():
     """Main function"""
     parser = argparse.ArgumentParser(description='Cache simulation for eviction analysis')
-    parser.add_argument('--log-file', default='logs/client_32.0gb_1.0rps_test_data.log',
-                       help='Path to the client log file')
+    parser.add_argument(
+        '--input-file', 
+        default='outputs/logs/experiments/qwen-8b_2025-08-12/server_64.0gb_0.9rps_29_5am_6am.log',
+        help='Path to the client log file'
+    )
     parser.add_argument('--cache-size', type=float, default=64.0,
                        help='Cache size in GB')
     parser.add_argument('--eviction-policy', choices=['lru', 'conversation_aware'], 
-                       default='lru',
+                       default='conversation_aware',
                        help='Eviction policy to use')
     parser.add_argument('--max-events', type=int, default=None,
                        help='Maximum number of events to process')
@@ -807,12 +907,12 @@ def main():
     
     args = parser.parse_args()
     # Create configuration
-    if 'qwen-8b' in args.log_file:
+    if 'qwen-8b' in args.input_file:
         model_name = 'Qwen/Qwen3-8B-FP8'
-    elif 'llama-8b' in args.log_file:
+    elif 'llama-8b' in args.input_file:
         model_name = 'meta-llama/Llama-3.1-8B-Instruct'
     else:
-        raise ValueError(f"Unknown model: {args.log_file}")
+        raise ValueError(f"Unknown model: {args.input_file}")
     _, bytes_per_token = get_bytes_per_token(model_name)
     chat_template_overhead = get_chat_template_overhead(model_name)
     print(f"Bytes per token: {bytes_per_token}")
@@ -820,7 +920,7 @@ def main():
     
     print("Cache Simulator for Eviction Analysis")
     print("="*80)
-    print(f"Log file: {args.log_file}")
+    print(f"Input file: {args.input_file}")
     print(f"Cache size: {args.cache_size} GB")
     print(f"Eviction policy: {args.eviction_policy}")
     print(f"Chunk size: {args.chunk_size}")
@@ -829,8 +929,8 @@ def main():
     print("="*80, flush=True)
     
     # Parse log file
-    parser = LogParser(args.log_file)
-    if "client" in args.log_file:
+    parser = LogParser(args.input_file)
+    if "client" in args.input_file:
         raise ValueError("Client log file not supported")
     else:
         events = parser.parse_log_file(mode='server')

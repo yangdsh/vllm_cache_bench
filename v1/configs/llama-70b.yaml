@@ -1,21 +1,19 @@
 # GPU Cache Experiment Configuration
 # Comprehensive cache pressure study with conversational vs non-conversational workloads
 
-tag: "qwen-32b"
-log_base_dir: "experiment_logs"
-model_name: "qwen-32b"
+tag: "llama-70b"
+log_base_dir: "outputs/logs/experiments"
+model_name: "llama-70b"
 
 defaults:
   num_prompts: 30000
-  time_limit: 1200
+  time_limit: 2400
+  hbm_size: 40
   use_conversation_evictions: [true, false]
   mock_decoding: false
 
 experiments:
     datasets:
-      - path: "../data/cw_logs_5_29_5am_6am.csv"
+      - path: "data/cw_logs_5_29_5am_6am.csv"
         cache_sizes: [128, 256, 512]
-        request_rates: [1.0]
-      - path: "../data/cw_logs_5_28_19pm_20pm.csv"
-        cache_sizes: [128, 256, 512]
-        request_rates: [0.5]
+        request_rates: [0.5, 1]

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 '''
 cd ~/PrefixCacheInternProject/vllm_cache_bench/v1
-python benchmark_runner.py --yaml ConfigFile/qwen-8b.yaml
+python src/entrypoint/benchmark_runner.py --yaml configs/models/qwen-8b.yaml
 '''
 
 """
@@ -10,6 +10,11 @@ Demonstrates usage of the experiment runner with various configurations.
 """
 import asyncio
 import argparse
+import sys
+import os
+
+# Add the src directory to the Python path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from config.config import create_default_experiment, CacheEvictionStrategy
 from environment.environment_provider import EnvironmentProvider

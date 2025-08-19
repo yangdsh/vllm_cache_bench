@@ -31,7 +31,7 @@ class ExperimentConfiguration:
     
     # Dataset configuration
     dataset_type: DatasetType = DatasetType.CONVERSATIONAL_CSV
-    dataset_file_path: str = '../data/test_data.csv'
+    dataset_file_path: str = 'data/test_data.csv'
     max_prompt_count: int = 30000
     time_limit_seconds: int = 600
     
@@ -46,7 +46,7 @@ class ExperimentConfiguration:
     experiment_tag: Optional[str] = None
     
     # Logging configuration
-    log_directory: Optional[str] = None
+    log_directory: Optional[str] = "outputs/logs"
     
     def get_model_spec(self) -> ModelSpec:
         """Get the model specification for this experiment"""
@@ -68,7 +68,7 @@ class ExperimentConfiguration:
     
     def get_log_directory(self) -> str:
         """Get log directory, defaulting to 'logs' if not specified"""
-        return self.log_directory or "logs"
+        return self.log_directory
 
 
 class ExperimentConfigurationBuilder:

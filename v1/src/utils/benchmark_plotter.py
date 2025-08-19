@@ -4,6 +4,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
+import sys
+import argparse
 from typing import List, Dict, Any
 
 class ResultPlotter:
@@ -71,19 +73,33 @@ class ResultPlotter:
 
 
 if __name__ == '__main__':
-    # Adjust the file path and output directory as needed
-    tag = 'llama-8b_2025-08-11'
-    file_path = f'../experiment_logs/{tag}/summary.json'
-    output_dir = tag
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Generate benchmark plots from experiment results')
+    parser.add_argument('--tag', type=str, required=True, help='Experiment tag (e.g., qwen-32b_2025-08-13)')
+    args = parser.parse_args()
     
-    plotter = ResultPlotter(file_path)
+    tag = args.tag
+    file_path = f'outputs/logs/experiments/{tag}/summary.json'
+    output_dir = f'outputs/plots/{tag}'
     
-    # Define the metrics you want to plot
-    metrics_to_plot = [
-        'mean_ttft_ms', 
-        'p99_ttft_ms',
-        'lmcache_retrieved_rate',
-        'lmcache_hit_rate'
-    ]
+    # Check if the summary.json file exists
+    if not os.path.exists(file_path):
+        print(f"❌ Error: Summary file not found at {file_path}")
+        sys.exit(1)
     
-    plotter.plot_metrics(metrics_to_plot, output_dir) 
+    try:
+        plotter = ResultPlotter(file_path)
+        
+        # Define the metrics you want to plot
+        metrics_to_plot = [
+            'mean_ttft_ms', 
+            'p99_ttft_ms',
+            'lmcache_retrieved_rate',
+            'lmcache_hit_rate'
+        ]
+        
+        plotter.plot_metrics(metrics_to_plot, output_dir)
+        print(f"✅ Successfully generated plots for tag: {tag}")
+    except Exception as e:
+        print(f"❌ Error generating plots: {e}")
+        sys.exit(1) 

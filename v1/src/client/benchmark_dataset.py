@@ -42,7 +42,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import conversation utilities
-from util.conversation_manager import ConversationManager
+from utils.conversation_manager import ConversationManager
 
 # -----------------------------------------------------------------------------
 # Data Classes

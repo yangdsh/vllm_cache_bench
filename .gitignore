@@ -1,9 +1,6 @@
-results
-v1/experiment_logs
-v1/logs
-v1/plotting/plots
 *.log
 *.out
 __*
 *.csv
+!data/test_data.csv
 *.png

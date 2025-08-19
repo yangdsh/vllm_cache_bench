@@ -84,7 +84,7 @@ def retrieve(tokens, **kwargs) -> torch.Tensor:
 - Port calculation: `9000 + CUDA_device_id` (from `CUDA_VISIBLE_DEVICES`)
 - Thread-safe HTTP server serving JSON metrics
 
-### 4. Client-Side Metrics (`vllm_cache_bench/v1/client/backend_request_func.py`)
+### 4. Client-Side Metrics (`src/client/backend_request_func.py`)
 
 **Client Statistics Collection:**
 ```python
@@ -98,7 +98,7 @@ class RequestStatistics:
     - error_counts: Dict[str, int]
 ```
 
-### 5. Client Getting Stats from the Server (`PrefixCacheInternProject/vllm_cache_bench/v1/client/print_statistics.py`)
+### 5. Client Getting Stats from the Server (`src/client/print_statistics.py`)
 
 ```python
 def print_cache_statistics(api_url: str):
@@ -122,7 +122,7 @@ conversation_nonzero_turn_ratio: 0.4200
 CLIENT_STATISTICS_END
 ```
 
-### 6. Log Analysis & Processing (`vllm_cache_bench/v1/execution/log_analyzer.py`)
+### 6. Log Analysis & Processing (`src/runner/result_reader.py`)
 
 **LogAnalyzer Class:**
 ```python
@@ -142,7 +142,7 @@ def _parse_client_log(client_log_path):
 - **Cache Statistics**: Hit rates, query patterns
 - **Conversation Features**: Turn patterns, temporal analysis
 
-### 7. Experiment Orchestration (`vllm_cache_bench/v1/execution/runner.py`)
+### 7. Experiment Orchestration (`src/runner/runner.py`)
 
 **ExperimentExecutor:**
 ```python
@@ -179,12 +179,12 @@ Raw Logs → LogAnalyzer → ExperimentMetrics → JSON Storage
 
 ## 📍 Key Collection Points
 
-### A. **Cache Engine Level** (`cache_engine.py`)
+### A. **Cache Engine Level** (`lmcache::cache_engine.py`)
 - **When**: Every lookup/store/retrieve operation
 - **What**: Token counts, hit rates, timing
 - **Storage**: In-memory `LMCStatsMonitor`
 
-### B. **HTTP Stats Server** (`observability.py`)
+### B. **HTTP Stats Server** (`lmcache::observability.py`)
 - **When**: On-demand via HTTP GET requests
 - **What**: Aggregated statistics, conversation analytics  
 - **Format**: JSON response with nested categories
@@ -193,8 +193,3 @@ Raw Logs → LogAnalyzer → ExperimentMetrics → JSON Storage
 - **When**: Every 100 requests during benchmark
 - **What**: vLLM + LMCache metrics, request patterns
 - **Output**: Structured log blocks for parsing
-
-### D. **Conversation Analysis** (`conversation.py`)
-- **When**: During cache lookup operations
-- **What**: Turn detection, temporal patterns, length analysis
-- **Context**: Maintains conversation state across turns

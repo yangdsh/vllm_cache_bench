@@ -138,7 +138,7 @@ class ClientCommandBuilder:
         client_arguments = self._build_client_arguments(config, experiment_context)
         
         base_command = (
-            "LMCACHE_LOG_LEVEL=DEBUG PYTHONUNBUFFERED=1 python client/benchmark_serving.py "
+            "LMCACHE_LOG_LEVEL=DEBUG PYTHONUNBUFFERED=1 python src/client/benchmark_serving.py "
             f"{client_arguments}"
         )
         

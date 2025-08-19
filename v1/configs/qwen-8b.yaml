@@ -2,7 +2,7 @@
 # Comprehensive cache pressure study with conversational vs non-conversational workloads
 
 tag: "qwen-8b"
-log_base_dir: "experiment_logs"
+log_base_dir: "outputs/logs/experiments"
 model_name: "qwen-8b"
 
 defaults:
@@ -12,18 +12,18 @@ defaults:
   mock_decoding: false
   # Global conversation eviction config (used if not specified per dataset)
   conversation_eviction_config:
-    reference_recency: 30.0
-    reference_time_interval: 30.0
+    reference_recency: 100.0
+    reference_time_interval: 100.0
     score_factor: 1.0
 
 experiments:
     datasets:
-      - path: "../data/cw_logs_5_29_5am_6am.csv"
+      - path: "data/cw_logs_5_29_5am_6am.csv"
         cache_sizes: [32, 64, 128, 256]
         request_rates: [0.9]
-      - path: "../data/cw_logs_5_28_19pm_20pm.csv"
-        cache_sizes: [64, 128, 256]
-        request_rates: [] # 0.35
+      - path: "data/cw_logs_5_28_19pm_20pm.csv"
+        cache_sizes: [32, 64, 128, 256]
+        request_rates: [0.4]
         conversation_eviction_config:
           reference_recency: 30.0
           reference_time_interval: 30.0

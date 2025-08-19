@@ -270,36 +270,3 @@ def get_chat_template_overhead(model_name: str) -> int:
         print(f"Warning: Could not calculate chat template overhead for {model_name}: {e}")
         print("Using default overhead of 8 tokens")
         return 8
-
-def kill_server(host):
-    """Kill all processes using the GPUs on a host."""
-    try:
-        # Kill any vllm processes for the current user
-        user = os.environ.get('USER')
-        if user:
-            pkill_cmd = f"pkill -u {user} -f vllm"
-            subprocess.run(pkill_cmd, shell=True, check=True)
-            print(f"Killed vllm processes for user {user}")
-    except subprocess.CalledProcessError as e:
-        print(f"Skipping killing vllm processes for user {user}: {e}")
-    
-    try:
-        # Command to find and kill all processes running on NVIDIA GPUs.
-        # It first checks if nvidia-smi command exists.
-        # Then, it gets the PIDs of GPU processes.
-        # If any PIDs are found, it attempts to kill them with SIGKILL.
-        kill_cmd = (
-            "if command -v nvidia-smi &> /dev/null; then "
-            "pids=$(nvidia-smi --query-compute-apps=pid --format=csv,noheader); "
-            "if [ -n \"$pids\" ]; then "
-            "echo \"$pids\" | xargs -r kill -9; "
-            "fi; "
-            "fi"
-        )
-        subprocess.run(kill_cmd, shell=True, check=True)
-        print("Killed any processes using GPUs on the local machine.")
-        print("Waiting for 10 seconds to ensure all processes are killed...")
-        time.sleep(10)
-    except subprocess.CalledProcessError as e:
-        print(f"No processes to kill or an error occurred: {e}")
-        return

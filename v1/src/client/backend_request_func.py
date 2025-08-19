@@ -57,9 +57,9 @@ if not logger.handlers:  # Only configure if no handlers exist
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import conversation utilities
-from util.conversation_manager import ConversationManager
+from utils.conversation_manager import ConversationManager
 # Import cache statistics functionality
-from util.print_statistics import print_cache_statistics
+from utils.print_statistics import print_cache_statistics
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 
