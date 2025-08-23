@@ -7,6 +7,8 @@ from typing import List, Optional, Dict, Tuple
 from transformers import AutoConfig, AutoTokenizer
 from datetime import datetime
 
+TOKEN_LIMIT = 16384
+
 @dataclass
 class Event:
     """Represents a log event for replay (send/done, from either client or server log)"""
@@ -68,6 +70,8 @@ class LogParser:
                     conversation_id = int(obs_match.group(1))
                     turn_number = int(obs_match.group(2))
                     num_tokens_tokenized = int(obs_match.group(3))
+                    if num_tokens_tokenized > TOKEN_LIMIT:
+                        continue
                     hit_tokens = int(obs_match.group(4))
                     request_id = obs_match.group(6)  # This is lookup_id
                     

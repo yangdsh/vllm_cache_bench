@@ -1,0 +1,30 @@
+# Example YAML configuration for cache simulator runner
+# This file demonstrates how to configure cache simulations
+
+tag: "simulation_qwen_8b"
+model_name: "qwen-8b"
+log_base_dir: "logs"
+
+# Global defaults for all experiments
+defaults:
+  request_rate_per_second: 1.0
+  max_concurrent_requests: 10
+  cache_eviction_strategy: "CONVERSATION_AWARE"
+  max_context_length: 16384
+  chunk_size: 256
+  block_size: 256
+  
+  # LightGBM-specific configuration options
+  lightgbm_mode: "regression"  # Options: "ranking", "regression", "classification"
+
+experiments:
+  datasets:
+    - path: "outputs/logs/server_aws_peak.log"
+      name: "aws_peak"
+      cache_size_gb: [64, 128, 256]
+      cache_eviction_strategy: ["LRU", "CONVERSATION_AWARE", "ORACLE"]
+    - path: "outputs/logs/server_aws_peak.log"
+      name: "aws_peak"
+      cache_size_gb: [64, 128, 256]
+      cache_eviction_strategy: ["LIGHTGBM"]
+      lightgbm_mode: ["regression", "ranking"]

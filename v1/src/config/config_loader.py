@@ -11,7 +11,6 @@ from datetime import datetime
 from config.config import (
     ExperimentConfiguration, 
     ExperimentConfigurationBuilder, 
-    CacheEvictionStrategy, 
     DatasetType
 )
 from environment.environment_provider import EnvironmentProvider
@@ -98,12 +97,19 @@ class YAMLExperimentConfigLoader:
         if not dataset_path:
             raise ConfigurationLoadingError("Dataset configuration must include 'path'")
         
-        # Get parameter ranges
-        cache_sizes = dataset_config.get('cache_sizes', [64.0])
-        request_rates = dataset_config.get('request_rates', [1.0])
+        # Get parameter ranges - support both old and new formats
+        cache_sizes = dataset_config.get('cache_size_gb', dataset_config.get('cache_sizes', [64.0]))
+        request_rates = dataset_config.get('request_rate_per_second', dataset_config.get('request_rates', [1.0]))
         
-        # Handle cache eviction strategies
-        eviction_strategies = global_defaults.get('use_conversation_evictions', [False])
+        # Ensure lists
+        if not isinstance(cache_sizes, list):
+            cache_sizes = [cache_sizes]
+        if not isinstance(request_rates, list):
+            request_rates = [request_rates]
+        
+        # Handle cache eviction strategies - support both old and new formats
+        eviction_strategies = dataset_config.get('cache_eviction_strategy', 
+            global_defaults.get('cache_eviction_strategy', ['CONVERSATION_AWARE']))
         if not isinstance(eviction_strategies, list):
             eviction_strategies = [eviction_strategies]
         
@@ -114,26 +120,45 @@ class YAMLExperimentConfigLoader:
         # Generate all combinations
         for cache_size in cache_sizes:
             for request_rate in request_rates:
-                for use_conversation_eviction in eviction_strategies:
+                for eviction_strategy in eviction_strategies:
+                    # Store the original string value for simulator compatibility
+                    strategy_string = str(eviction_strategy).lower()
+                    
                     config_params = {
                         'dataset_file_path': dataset_path,
                         'cache_size_gb': float(cache_size),
                         'request_rate_per_second': float(request_rate),
-                        'cache_eviction_strategy': (
-                            CacheEvictionStrategy.CONVERSATION_AWARE 
-                            if use_conversation_eviction 
-                            else CacheEvictionStrategy.STANDARD
-                        )
+                        'cache_eviction_strategy': strategy_string
                     }
                     
                     # Add conversation eviction config if using conversation-aware strategy
-                    if use_conversation_eviction and conversation_eviction_config is not None:
+                    if strategy_string in ['conversation_aware', 'lightgbm'] and conversation_eviction_config is not None:
                         config_params['conversation_eviction_config'] = conversation_eviction_config
+                    
+                    # Add lightgbm-specific configuration if using lightgbm strategy
+                    if strategy_string == 'lightgbm':
+                        # Get lightgbm mode from dataset config or global defaults
+                        lightgbm_mode = dataset_config.get('lightgbm_mode', 
+                            global_defaults.get('lightgbm_mode', 'regression'))
+                        
+                        # Handle list expansion for lightgbm_mode
+                        if isinstance(lightgbm_mode, list):
+                            # Create separate config for each lightgbm mode
+                            for mode in lightgbm_mode:
+                                mode_config = config_params.copy()
+                                mode_config['lightgbm_mode'] = mode
+                                
+                                individual_configs.append(mode_config)
+                            continue  # Skip adding the original config_params since we added individual ones
+                        else:
+                            config_params['lightgbm_mode'] = lightgbm_mode
                     
                     # Add other dataset-specific parameters
                     for key, value in dataset_config.items():
-                        if key not in ['path', 'cache_sizes', 'request_rates', 
-                                       'use_conversation_eviction', 'conversation_eviction_config']:
+                        if key not in ['path', 'cache_sizes', 'cache_size_gb', 'request_rates', 
+                                       'request_rate_per_second', 'cache_eviction_strategy', 'use_conversation_eviction', 
+                                       'conversation_eviction_config', 'mock_decoding', 'num_prompts', 'time_limit',
+                                       'lightgbm_mode']:
                             # Map old parameter names to new ones
                             if key == 'num_prompts':
                                 config_params['max_prompt_count'] = value
@@ -199,12 +224,16 @@ class YAMLExperimentConfigLoader:
                         builder.with_dataset(dataset_path, dataset_type)
                         
                         # Set cache eviction strategy
-                        eviction_strategy = config_dict.get('cache_eviction_strategy', CacheEvictionStrategy.STANDARD)
+                        eviction_strategy = config_dict.get('cache_eviction_strategy', 'conversation_aware')
                         builder.with_cache_eviction_strategy(eviction_strategy)
                         
                         # Set conversation eviction config if specified
                         if config_dict.get('conversation_eviction_config') is not None:
                             builder.with_conversation_eviction_config(config_dict['conversation_eviction_config'])
+                        
+                        # Set LightGBM mode if specified
+                        if config_dict.get('lightgbm_mode') is not None:
+                            builder.with_lightgbm_mode(config_dict['lightgbm_mode'])
                         
                         # Set limits
                         max_prompts = config_dict.get('max_prompt_count', experiment_defaults.get('num_prompts', 30000))

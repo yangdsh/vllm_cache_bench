@@ -16,7 +16,7 @@ import os
 # Add the src directory to the Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from config.config import create_default_experiment, CacheEvictionStrategy
+from config.config import create_default_experiment
 from environment.environment_provider import EnvironmentProvider
 from runner.resource_manager import ExperimentResourceManager
 from runner.runner import create_experiment_runner
@@ -73,7 +73,7 @@ async def run_single_experiment_demo():
     # Create a simple experiment
     experiment = create_default_experiment()
     experiment.model_name = "qwen-8b" # "llama-70b"
-    experiment.cache_eviction_strategy = CacheEvictionStrategy.CONVERSATION_AWARE
+    experiment.cache_eviction_strategy = "conversation_aware"
     
     print(f"Running experiment: {experiment.get_experiment_identifier()}")
     print(f"Model: {experiment.model_name}")

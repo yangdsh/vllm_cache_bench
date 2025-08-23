@@ -4,7 +4,7 @@ Command builder with clean architecture.
 Handles vLLM server command construction with proper separation of concerns.
 """
 import json
-from .config import ExperimentConfiguration, CacheEvictionStrategy, RuntimeExperimentContext
+from .config import ExperimentConfiguration, RuntimeExperimentContext
 from .model_registry import ModelSpec, Environment
 
 
@@ -112,7 +112,7 @@ class ServerCommandBuilder:
             cache_prefix = f"LMCACHE_MAX_LOCAL_CPU_SIZE={local_cpu_cache_size}"
             
             # Add conversation eviction configuration
-            if config.cache_eviction_strategy == CacheEvictionStrategy.CONVERSATION_AWARE:
+            if config.cache_eviction_strategy in ["conversation_aware", "lightgbm"]:
                 extra_config = {"use_conversation_eviction": True}
                 
                 # Add conversation eviction config if specified

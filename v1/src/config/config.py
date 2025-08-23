@@ -14,10 +14,7 @@ class DatasetType(Enum):
     CONVERSATIONAL_CSV = "conversational_csv"
 
 
-class CacheEvictionStrategy(Enum):
-    """Cache eviction strategies"""
-    STANDARD = "standard"
-    CONVERSATION_AWARE = "conversation_aware"
+
 
 
 @dataclass(frozen=False)
@@ -40,10 +37,13 @@ class ExperimentConfiguration:
     server_port: int = 8000
     
     # Advanced options
-    cache_eviction_strategy: CacheEvictionStrategy = CacheEvictionStrategy.STANDARD
+    cache_eviction_strategy: str = "lru"
     conversation_eviction_config: Optional[Dict[str, Any]] = None
     enable_mock_decoding: bool = False
     experiment_tag: Optional[str] = None
+    
+    # LightGBM-specific configuration
+    lightgbm_mode: str = "regression"  # Options: "ranking", "regression", "classification"
     
     # Logging configuration
     log_directory: Optional[str] = "outputs/logs"
@@ -57,18 +57,20 @@ class ExperimentConfiguration:
         model_spec = self.get_model_spec()
         return model_spec.total_gpu_requirement
     
-    def get_experiment_identifier(self) -> str:
-        """Generate a unique identifier for this experiment configuration"""
-        if self.cache_eviction_strategy == CacheEvictionStrategy.CONVERSATION_AWARE:
-            eviction_suffix = "_conv_aware" 
-        else:
-            eviction_suffix = ""
-        return (f"_{self.cache_size_gb}gb_{self.request_rate_per_second}rps{eviction_suffix}"
-                f"_{self.dataset_file_path.split('/')[-1].split('.')[0][-10:]}")
-    
     def get_log_directory(self) -> str:
         """Get log directory, defaulting to 'logs' if not specified"""
         return self.log_directory
+
+    def get_experiment_identifier(self) -> str:
+        """Generate a unique identifier for this experiment configuration"""
+        eviction_suffix = f"_{self.cache_eviction_strategy}"
+        
+        # Add lightgbm_mode to identifier if using lightgbm strategy
+        if self.cache_eviction_strategy == "lightgbm" and hasattr(self, 'lightgbm_mode'):
+            eviction_suffix = f"_{self.cache_eviction_strategy}_{self.lightgbm_mode}"
+        
+        return (f"_{self.cache_size_gb}gb_{self.request_rate_per_second}rps{eviction_suffix}"
+                f"_{self.dataset_file_path.split('/')[-1].split('.')[0][-10:]}")
 
 
 class ExperimentConfigurationBuilder:
@@ -99,15 +101,20 @@ class ExperimentConfigurationBuilder:
         self._config_params['dataset_type'] = dataset_type
         return self
     
-    def with_cache_eviction_strategy(self, strategy: CacheEvictionStrategy
-                                    ) -> 'ExperimentConfigurationBuilder':
+    def with_cache_eviction_strategy(self, strategy: str) -> 'ExperimentConfigurationBuilder':
         """Set cache eviction strategy"""
-        self._config_params['cache_eviction_strategy'] = strategy
+        # Store the strategy as a string
+        self._config_params['cache_eviction_strategy'] = strategy.lower()
         return self
     
     def with_conversation_eviction_config(self, config: Optional[Dict[str, Any]]) -> 'ExperimentConfigurationBuilder':
         """Set conversation eviction configuration"""
         self._config_params['conversation_eviction_config'] = config
+        return self
+    
+    def with_lightgbm_mode(self, mode: str) -> 'ExperimentConfigurationBuilder':
+        """Set LightGBM mode (ranking, regression, or classification)"""
+        self._config_params['lightgbm_mode'] = mode.lower()
         return self
     
     def with_limits(self, max_prompts: int, time_limit: int) -> 'ExperimentConfigurationBuilder':
